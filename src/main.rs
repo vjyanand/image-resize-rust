@@ -128,7 +128,7 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
             )));
         }
     };
-    
+
     println!("Done resize for url [{}]", query.url);
 
     let bytes = ops::jpegsave_buffer(&resized_image).expect("");

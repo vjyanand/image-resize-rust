@@ -19,7 +19,8 @@ async fn main() {
         .and(warp::path("img"))
         .and(warp::query::<RequestQuery>())
         .and(warp::path::end())
-        .and_then(resize);
+        .and_then(resize)
+        .with(warp::log("resize::api"));
 
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| String::from("8080"))
@@ -33,6 +34,8 @@ async fn main() {
 }
 
 async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+    println!("Resizing for url [{}]", query.url);
+
     if !query.url.starts_with("http") {
         return Ok(Box::new(warp::reply::with_status(
             "Invalid url",
@@ -128,8 +131,6 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
             )));
         }
     };
-
-    println!("Done resize for url [{}]", query.url);
 
     let bytes = ops::jpegsave_buffer(&resized_image).expect("");
     let builder = warp::http::response::Builder::new();

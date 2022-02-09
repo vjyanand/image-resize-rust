@@ -98,7 +98,7 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
         Ok(img) => img,
         Err(_) => {
             return Ok(Box::new(warp::reply::with_status(
-                "Error converting image from remote URL",
+                "Error converting image from remote url",
                 StatusCode::INTERNAL_SERVER_ERROR,
             )))
         }

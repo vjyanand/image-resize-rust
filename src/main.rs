@@ -15,7 +15,7 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
-    let resolve_route = warp::get()
+    let resize_route = warp::get()
         .and(warp::path("img"))
         .and(warp::query::<RequestQuery>())
         .and(warp::path::end())
@@ -27,7 +27,7 @@ async fn main() {
         .expect("PORT must be a number");
 
     let health_route = warp::path!("ping").map(|| StatusCode::OK);
-    let routes = (health_route).or(resolve_route);
+    let routes = (health_route).or(resize_route);
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await
 }

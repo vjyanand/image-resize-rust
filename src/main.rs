@@ -26,11 +26,8 @@ async fn main() {
         .parse()
         .expect("PORT must be a number");
 
-    let log = warp::log("image::api");
-    let log_route = warp::any().map(warp::reply).with(log);
-
     let health_route = warp::path!("ping").map(|| StatusCode::OK);
-    let routes = (health_route).or(resolve_route).or(log_route);
+    let routes = (health_route).or(resolve_route);
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await
 }
@@ -131,6 +128,8 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
             )));
         }
     };
+    
+    println!("Done resize for url [{}]", query.url);
 
     let bytes = ops::jpegsave_buffer(&resized_image).expect("");
     let builder = warp::http::response::Builder::new();

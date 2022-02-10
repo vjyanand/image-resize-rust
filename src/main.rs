@@ -76,8 +76,13 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
     };
 
     if !response.status().is_success() {
+        let error_string = format!(
+            "Error fetching image from remote, status code:{}",
+            response.status().as_str()
+        );
+
         return Ok(Box::new(warp::reply::with_status(
-            "Error parsing image",
+            error_string,
             StatusCode::INTERNAL_SERVER_ERROR,
         )));
     }

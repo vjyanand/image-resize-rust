@@ -3,7 +3,7 @@ use libvips::{self, ops, VipsApp, VipsImage};
 use reqwest::{self, header, redirect::Policy, ClientBuilder, StatusCode};
 use serde::Deserialize;
 use std::{env, error::Error, fmt, time::Duration};
-use warp::Filter;
+use warp::{hyper::body::Bytes, Filter};
 
 lazy_static! {
     static ref VIPS_APP: VipsApp = {
@@ -33,17 +33,9 @@ async fn main() {
     warp::serve(routes).run(([0, 0, 0, 0], port)).await
 }
 
-async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    println!("Resizing for url [{}]", query.url);
-
-    if !query.url.starts_with("http") {
-        return Ok(Box::new(warp::reply::with_status(
-            "Invalid url",
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )));
-    }
-
+async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let mut headers = header::HeaderMap::new();
+
     headers.insert(
         "Referer",
         header::HeaderValue::from_static("https://google.com"),
@@ -57,22 +49,14 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
 
     let client = match client {
         Ok(client) => client,
-        Err(_) => {
-            return Ok(Box::new(warp::reply::with_status(
-                "Error getting resource",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )))
-        }
+        Err(err) => return Err(Box::new(err)),
     };
-    let response = client.get(&query.url).send().await;
+
+    let response = client.get(url).send().await;
+
     let response = match response {
         Ok(r) => r,
-        Err(_) => {
-            return Ok(Box::new(warp::reply::with_status(
-                "Error getting image from remote",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )))
-        }
+        Err(err) => return Err(Box::new(err)),
     };
 
     if !response.status().is_success() {
@@ -80,19 +64,31 @@ async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejec
             "Error fetching image from remote, status code:{}",
             response.status().as_str()
         );
-
-        return Ok(Box::new(warp::reply::with_status(
-            error_string,
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )));
+        return Err(Box::new(InvalidResponseError { msg: error_string }));
     }
 
     let bytes = response.bytes().await;
+    match bytes {
+        Ok(bytes) => return Ok(bytes),
+        Err(err) => return Err(Box::new(err)),
+    };
+}
+
+async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+    println!("Resizing for url [{}]", query.url);
+
+    if !query.url.starts_with("http") {
+        return Ok(Box::new(warp::reply::with_status(
+            "Invalid url",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )));
+    }
+    let bytes = fetch(&query.url).await;
     let bytes = match bytes {
         Ok(bytes) => bytes,
-        Err(_) => {
+        Err(err) => {
             return Ok(Box::new(warp::reply::with_status(
-                "Invalid response from remote image",
+                err.to_string(),
                 StatusCode::INTERNAL_SERVER_ERROR,
             )))
         }
@@ -223,7 +219,7 @@ pub struct Size {
     pub height: Option<i32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct InvalidSizeError {
     msg: String,
 }
@@ -241,3 +237,16 @@ impl fmt::Display for InvalidSizeError {
 }
 
 impl Error for InvalidSizeError {}
+
+#[derive(Debug)]
+struct InvalidResponseError {
+    msg: String,
+}
+
+impl fmt::Display for InvalidResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Invalid size {}", self.msg)
+    }
+}
+
+impl Error for InvalidResponseError {}

@@ -1,9 +1,12 @@
+use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use bytes::Bytes;
+use http::StatusCode;
 use lazy_static::lazy_static;
 use libvips::{self, ops, VipsApp, VipsImage};
-use reqwest::{self, header, redirect::Policy, ClientBuilder, StatusCode};
+use reqwest::{self, header, redirect::Policy, ClientBuilder};
 use serde::Deserialize;
 use std::{env, error::Error, fmt, time::Duration};
-use warp::{hyper::body::Bytes, Filter};
+use url::form_urlencoded::byte_serialize;
 
 lazy_static! {
     static ref VIPS_APP: VipsApp = {
@@ -13,24 +16,102 @@ lazy_static! {
     };
 }
 
-#[tokio::main]
-async fn main() {
-    let resize_route = warp::get()
-        .and(warp::path("img"))
-        .and(warp::query::<RequestQuery>())
-        .and(warp::path::end())
-        .and_then(resize)
-        .with(warp::log("resize::api"));
+#[get("/")]
+async fn ok() -> impl Responder {
+    HttpResponse::Ok().body("OK")
+}
 
+#[get("/img")]
+async fn img(req: HttpRequest) -> impl Responder {
+    let query = web::Query::<RequestQuery>::from_query(req.query_string()).unwrap();
+
+    println!("Resizing for url [{}]", query.url);
+
+    if !query.url.starts_with("http") {
+        return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
+    }
+
+    let fetch_response = fetch(&query.url).await;
+    let mut bytes: Option<Bytes> = None;
+    if let Ok(b) = fetch_response {
+        bytes = Some(b);
+    } else {
+        let url_encoded: String = byte_serialize(&query.url.as_bytes()).collect();
+        let url = format!("https://images.weserv.nl/?url={}", url_encoded);
+        let fetch_response = fetch(&url).await;
+        if let Ok(b) = fetch_response {
+            bytes = Some(b);
+        }
+    }
+
+    println!("Poda{}", query.url);
+
+    let bytes = match bytes {
+        Some(bytes) => bytes,
+        None => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
+    };
+
+    let desired_size = Size {
+        width: query.w,
+        height: query.h,
+    };
+
+    let bytes = resize(bytes, &desired_size).await;
+    if let Ok(bytes) = bytes {
+        HttpResponse::Ok()
+            .content_type("image/jpeg")
+            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+            .append_header(("Dai", "Poda"))
+            .body(bytes)
+    } else {
+        HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
+    }
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| String::from("8080"))
         .parse()
         .expect("PORT must be a number");
 
-    let health_route = warp::path!("ping").map(|| StatusCode::OK);
-    let routes = (health_route).or(resize_route);
+    let binding_interface = format!("127.0.0.1:{}", port);
 
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await
+    HttpServer::new(|| App::new().service(ok).service(img))
+        .bind(binding_interface)?
+        .run()
+        .await
+}
+
+async fn resize(bytes: Bytes, desired_size: &Size) -> Result<Vec<u8>, libvips::error::Error> {
+    let image = VipsImage::new_from_buffer(&bytes, "");
+    let image = match image {
+        Ok(image) => image,
+        Err(err) => {
+            return Err(err);
+        }
+    };
+
+    let original_width = image.get_width();
+    let resized = get_target_size(original_width, image.get_height(), desired_size);
+    let resized = match resized {
+        Ok(resized) => resized,
+        Err(_) => {
+            return Err(libvips::error::Error::InitializationError(""));
+        }
+    };
+    let scale_factor = f64::from(resized.0) / f64::from(original_width);
+    let resized_image = ops::resize(&image, scale_factor);
+
+    let resized_image = match resized_image {
+        Ok(resized_image) => resized_image,
+        Err(err) => {
+            println!("{:?}", err);
+            return Err(err);
+        }
+    };
+    let bytes = ops::jpegsave_buffer(&resized_image).expect("");
+    return Ok(bytes);
 }
 
 async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
@@ -74,76 +155,6 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     };
 }
 
-async fn resize(query: RequestQuery) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    println!("Resizing for url [{}]", query.url);
-
-    if !query.url.starts_with("http") {
-        return Ok(Box::new(warp::reply::with_status(
-            "Invalid url",
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )));
-    }
-    let bytes = fetch(&query.url).await;
-    let bytes = match bytes {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            return Ok(Box::new(warp::reply::with_status(
-                err.to_string(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )))
-        }
-    };
-
-    let img = VipsImage::new_from_buffer(&bytes, "");
-    let img = match img {
-        Ok(img) => img,
-        Err(_) => {
-            return Ok(Box::new(warp::reply::with_status(
-                "Error converting image from remote url",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )))
-        }
-    };
-    let desired_size = Size {
-        width: query.w,
-        height: query.h,
-    };
-
-    let original_width = img.get_width();
-    let resized = get_target_size(original_width, img.get_height(), desired_size);
-    let resized = match resized {
-        Ok(resized) => resized,
-        Err(_) => {
-            return Ok(Box::new(warp::reply::with_status(
-                "Error getting image size",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )))
-        }
-    };
-    let scale_factor = f64::from(resized.0) / f64::from(original_width);
-    let resized_image = ops::resize(&img, scale_factor);
-    let resized_image = match resized_image {
-        Ok(resized_image) => resized_image,
-        Err(err) => {
-            println!("{:?}", err);
-            return Ok(Box::new(warp::reply::with_status(
-                "Error resizing image",
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )));
-        }
-    };
-
-    let bytes = ops::jpegsave_buffer(&resized_image).expect("");
-    let builder = warp::http::response::Builder::new();
-    let builder = builder
-        .header("Content-Type", "image/jpeg")
-        .header("Cache-Control", "public, max-age=604800, immutable")
-        .status(200)
-        .body(bytes)
-        .unwrap();
-    Ok(Box::new(builder))
-}
-
 #[derive(Deserialize)]
 struct RequestQuery {
     url: String,
@@ -151,10 +162,29 @@ struct RequestQuery {
     h: Option<i32>,
 }
 
+#[derive(Debug)]
+struct InvalidResponseError {
+    msg: String,
+}
+
+impl fmt::Display for InvalidResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Invalid size {}", self.msg)
+    }
+}
+
+impl Error for InvalidResponseError {}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Size {
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+}
+
 fn get_target_size(
     original_width: i32,
     original_height: i32,
-    desired_size: Size,
+    desired_size: &Size,
 ) -> Result<(i32, i32), InvalidSizeError> {
     match &desired_size {
         Size {
@@ -213,12 +243,6 @@ fn get_ratio(desired_measure: i32, original_measure: i32, opposite_orig_measure:
     (opposite_orig_measure as f32 * ratio) as i32
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct Size {
-    pub width: Option<i32>,
-    pub height: Option<i32>,
-}
-
 #[derive(Debug)]
 struct InvalidSizeError {
     msg: String,
@@ -237,16 +261,3 @@ impl fmt::Display for InvalidSizeError {
 }
 
 impl Error for InvalidSizeError {}
-
-#[derive(Debug)]
-struct InvalidResponseError {
-    msg: String,
-}
-
-impl fmt::Display for InvalidResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid size {}", self.msg)
-    }
-}
-
-impl Error for InvalidResponseError {}

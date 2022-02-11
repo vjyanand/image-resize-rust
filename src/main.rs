@@ -43,9 +43,6 @@ async fn img(req: HttpRequest) -> impl Responder {
             bytes = Some(b);
         }
     }
-
-    println!("Resizing for image with url{}", query.url);
-
     let bytes = match bytes {
         Some(bytes) => bytes,
         None => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
@@ -64,6 +61,7 @@ async fn img(req: HttpRequest) -> impl Responder {
             .append_header(("Server", "None 1.1"))
             .body(bytes)
     } else {
+        println!("Failed resize for image with url [{}]", query.url);
         HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
     }
 }

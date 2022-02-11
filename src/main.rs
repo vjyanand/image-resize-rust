@@ -44,7 +44,7 @@ async fn img(req: HttpRequest) -> impl Responder {
         }
     }
 
-    println!("Poda{}", query.url);
+    println!("Resizing for image with url{}", query.url);
 
     let bytes = match bytes {
         Some(bytes) => bytes,
@@ -61,7 +61,7 @@ async fn img(req: HttpRequest) -> impl Responder {
         HttpResponse::Ok()
             .content_type("image/jpeg")
             .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-            .append_header(("Dai", "Poda"))
+            .append_header(("Server", "None 1.1"))
             .body(bytes)
     } else {
         HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
@@ -75,7 +75,7 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("PORT must be a number");
 
-    let binding_interface = format!("127.0.0.1:{}", port);
+    let binding_interface = format!("0.0.0.0:{}", port);
 
     HttpServer::new(|| App::new().service(ok).service(img))
         .bind(binding_interface)?

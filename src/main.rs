@@ -11,7 +11,7 @@ use url::form_urlencoded::byte_serialize;
 lazy_static! {
     static ref VIPS_APP: VipsApp = {
         let app = VipsApp::new("image-resize", true).expect("Can't initialize Vips");
-        app.concurrency_set(20);
+        app.concurrency_set(2);
         app
     };
 }

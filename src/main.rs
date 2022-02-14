@@ -27,10 +27,16 @@ async fn img(req: HttpRequest) -> impl Responder {
     if query.url.starts_with("//") {
         query.url = format!("https:{}", query.url);
     }
-    println!("Resizing for url [{}]", query.url);
+
     if !query.url.starts_with("http") {
-        return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
+        let alt_url = env::var("IMAGE_FALLBACK_URL");
+        if let Ok(alt_url) = alt_url {
+            query.url = alt_url;
+        } else {
+            return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
+        }
     }
+    println!("Resizing for url [{}]", query.url);
 
     let fetch_response = fetch(&query.url).await;
     let mut bytes: Option<Bytes> = None;

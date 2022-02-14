@@ -23,10 +23,12 @@ async fn ok() -> impl Responder {
 
 #[get("/img")]
 async fn img(req: HttpRequest) -> impl Responder {
-    let query = web::Query::<RequestQuery>::from_query(req.query_string()).unwrap();
+    let mut query = web::Query::<RequestQuery>::from_query(req.query_string()).unwrap();
 
     println!("Resizing for url [{}]", query.url);
-
+    if query.url.starts_with("//") {
+        query.url = format!("https:{}", query.url);
+    }
     if !query.url.starts_with("http") {
         return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
     }

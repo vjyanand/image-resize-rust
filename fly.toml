@@ -1,4 +1,4 @@
-# fly.toml file generated for image-resize-rust-iavian on 2022-02-11T17:45:53+05:30
+# fly.toml file generated for image-resize-rust-iavian on 2022-02-18T16:26:27+05:30
 
 app = "image-resize-rust-iavian"
 
@@ -7,7 +7,6 @@ kill_timeout = 5
 processes = []
 
 [env]
-  IMAGE_FALLBACK_URL = "http://thereport.be/static/img/holder.png"
 
 [experimental]
   allowed_public_ports = []
@@ -35,6 +34,6 @@ processes = []
 
   [[services.tcp_checks]]
     grace_period = "1s"
-    interval = "8s"
+    interval = "15s"
     restart_limit = 0
     timeout = "2s"

@@ -9,18 +9,7 @@ use std::{env, error::Error, fmt, time::Duration};
 use url::form_urlencoded::byte_serialize;
 
 lazy_static! {
-    static ref VIPS_APP: VipsApp = {
-        let app = VipsApp::new("image-resize", true).expect("Can't initialize Vips");
-        /*app.concurrency_set(1);
-        app.cache_set_max_mem(0);
-        app.cache_set_max(0);*/
-        app
-    };
-}
-
-#[get("/")]
-async fn ok() -> impl Responder {
-    HttpResponse::Ok().body("OK")
+    static ref VIPS_APP: VipsApp = VipsApp::new("image-resize", true).expect("Can't initialize Vips");
 }
 
 #[get("/img")]
@@ -73,6 +62,11 @@ async fn img(req: HttpRequest) -> impl Responder {
         println!("Failed resize for image with url [{}]", query.url);
         HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
     }
+}
+
+#[get("/")]
+async fn ok() -> impl Responder {
+    HttpResponse::Ok().body("OK")
 }
 
 #[actix_web::main]

@@ -9,7 +9,8 @@ use std::{env, error::Error, fmt, time::Duration};
 use url::form_urlencoded::byte_serialize;
 
 lazy_static! {
-    static ref VIPS_APP: VipsApp = VipsApp::new("image-resize", true).expect("Can't initialize Vips");
+    static ref VIPS_APP: VipsApp =
+        VipsApp::new("image-resize", true).expect("Can't initialize Vips");
 }
 
 #[get("/img")]

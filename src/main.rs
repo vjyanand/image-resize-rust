@@ -1,16 +1,34 @@
 use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use bytes::Bytes;
 use http::StatusCode;
-use lazy_static::lazy_static;
-use libvips::{self, ops, VipsApp, VipsImage};
-use reqwest::{self, header, redirect::Policy, ClientBuilder};
+use image::imageops::FilterType::{self};
+use image::ImageOutputFormat;
+use reqwest::ClientBuilder;
+use reqwest::{self, header, redirect::Policy};
 use serde::Deserialize;
-use std::{env, error::Error, fmt, time::Duration};
+use std::io::Cursor;
+use std::{env, fmt, io};
+use std::{error::Error, time::Duration};
 use url::form_urlencoded::byte_serialize;
 
-lazy_static! {
-    static ref VIPS_APP: VipsApp =
-        VipsApp::new("image-resize", true).expect("Can't initialize Vips");
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let port: u16 = env::var("PORT")
+        .unwrap_or_else(|_| String::from("8080"))
+        .parse()
+        .expect("PORT must be a number");
+
+    let binding_interface = format!("0.0.0.0:{}", port);
+    println!("Listening at {}", binding_interface);
+    HttpServer::new(|| App::new().service(ok).service(img))
+        .bind(binding_interface)?
+        .run()
+        .await
+}
+
+#[get("/")]
+async fn ok() -> impl Responder {
+    HttpResponse::Ok().body("OK")
 }
 
 #[get("/img")]
@@ -32,6 +50,7 @@ async fn img(req: HttpRequest) -> impl Responder {
 
     let fetch_response = fetch(&query.url).await;
     let mut bytes: Option<Bytes> = None;
+
     if let Ok(b) = fetch_response {
         bytes = Some(b);
     } else {
@@ -42,9 +61,19 @@ async fn img(req: HttpRequest) -> impl Responder {
             bytes = Some(b);
         }
     }
+
     let bytes = match bytes {
         Some(bytes) => bytes,
         None => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
+    };
+
+    let reader = image::io::Reader::new(io::Cursor::new(bytes))
+        .with_guessed_format()
+        .unwrap();
+        
+    let image = match reader.decode() {
+        Ok(image) => image,
+        Err(_) => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
     };
 
     let desired_size = Size {
@@ -52,68 +81,26 @@ async fn img(req: HttpRequest) -> impl Responder {
         height: query.h,
     };
 
-    let bytes = resize(bytes, &desired_size).await;
-    if let Ok(bytes) = bytes {
-        HttpResponse::Ok()
-            .content_type("image/jpeg")
-            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-            .append_header(("Server", "None 1.1"))
-            .body(bytes)
-    } else {
-        println!("Failed resize for image with url [{}]", query.url);
-        HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
-    }
-}
-
-#[get("/")]
-async fn ok() -> impl Responder {
-    HttpResponse::Ok().body("OK")
-}
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    let port: u16 = env::var("PORT")
-        .unwrap_or_else(|_| String::from("8080"))
-        .parse()
-        .expect("PORT must be a number");
-
-    let binding_interface = format!("0.0.0.0:{}", port);
-
-    HttpServer::new(|| App::new().service(ok).service(img))
-        .bind(binding_interface)?
-        .run()
-        .await
-}
-
-async fn resize(bytes: Bytes, desired_size: &Size) -> Result<Vec<u8>, libvips::error::Error> {
-    let image = VipsImage::new_from_buffer(&bytes, "");
-    let image = match image {
-        Ok(image) => image,
-        Err(err) => {
-            return Err(err);
-        }
-    };
-
-    let original_width = image.get_width();
-    let resized = get_target_size(original_width, image.get_height(), desired_size);
+    let resized = get_target_size(image.width(), image.height(), &desired_size);
     let resized = match resized {
         Ok(resized) => resized,
-        Err(_) => {
-            return Err(libvips::error::Error::InitializationError(""));
-        }
+        Err(_) => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
     };
-    let scale_factor = f64::from(resized.0) / f64::from(original_width);
-    let resized_image = ops::resize(&image, scale_factor);
 
-    let resized_image = match resized_image {
-        Ok(resized_image) => resized_image,
-        Err(err) => {
-            println!("{:?}", err);
-            return Err(err);
-        }
-    };
-    let bytes = ops::jpegsave_buffer(&resized_image).expect("");
-    return Ok(bytes);
+    let image = image.resize(resized.0, resized.1, FilterType::Lanczos3);
+    let mut img_bytes = vec![];
+    let result = image.write_to(
+        &mut Cursor::new(&mut img_bytes),
+        ImageOutputFormat::Jpeg(80),
+    );
+    match result {
+        Ok(_) => HttpResponse::Ok()
+            .content_type("image/jpeg")
+            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+            .append_header(("Server", "iavian 1.1"))
+            .body(img_bytes),
+        Err(_) => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
+    }
 }
 
 async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
@@ -157,37 +144,17 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     };
 }
 
-#[derive(Deserialize)]
-struct RequestQuery {
-    url: String,
-    w: Option<i32>,
-    h: Option<i32>,
-}
-
-#[derive(Debug)]
-struct InvalidResponseError {
-    msg: String,
-}
-
-impl fmt::Display for InvalidResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid size {}", self.msg)
-    }
-}
-
-impl Error for InvalidResponseError {}
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct Size {
-    pub width: Option<i32>,
-    pub height: Option<i32>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 fn get_target_size(
-    original_width: i32,
-    original_height: i32,
+    original_width: u32,
+    original_height: u32,
     desired_size: &Size,
-) -> Result<(i32, i32), InvalidSizeError> {
+) -> Result<(u32, u32), InvalidSizeError> {
     match &desired_size {
         Size {
             width: None,
@@ -240,9 +207,9 @@ fn is_negative_or_zero(size: &Size) -> bool {
         || (size.width.is_some() && size.width.unwrap() <= 0)
 }
 
-fn get_ratio(desired_measure: i32, original_measure: i32, opposite_orig_measure: i32) -> i32 {
+fn get_ratio(desired_measure: u32, original_measure: u32, opposite_orig_measure: u32) -> u32 {
     let ratio = desired_measure as f32 / original_measure as f32;
-    (opposite_orig_measure as f32 * ratio) as i32
+    (opposite_orig_measure as f32 * ratio) as u32
 }
 
 #[derive(Debug)]
@@ -263,3 +230,23 @@ impl fmt::Display for InvalidSizeError {
 }
 
 impl Error for InvalidSizeError {}
+
+#[derive(Debug)]
+struct InvalidResponseError {
+    msg: String,
+}
+
+impl fmt::Display for InvalidResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Invalid size {}", self.msg)
+    }
+}
+
+impl Error for InvalidResponseError {}
+
+#[derive(Deserialize)]
+struct RequestQuery {
+    url: String,
+    w: Option<u32>,
+    h: Option<u32>,
+}

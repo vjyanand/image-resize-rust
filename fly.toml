@@ -1,6 +1,6 @@
 # fly.toml file generated for dai-poda-image-iavian on 2022-06-15T07:25:52+05:30
 
-app = "dai-poda-image-iavian"
+app = "image-resize-rust-iavian"
 
 kill_signal = "SIGINT"
 kill_timeout = 5

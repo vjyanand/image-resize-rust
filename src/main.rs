@@ -50,7 +50,6 @@ async fn img(req: HttpRequest) -> impl Responder {
 
     let fetch_response = fetch(&query.url).await;
     let mut bytes: Option<Bytes> = None;
-
     if let Ok(b) = fetch_response {
         bytes = Some(b);
     } else {
@@ -61,7 +60,6 @@ async fn img(req: HttpRequest) -> impl Responder {
             bytes = Some(b);
         }
     }
-
     let bytes = match bytes {
         Some(bytes) => bytes,
         None => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
@@ -70,7 +68,6 @@ async fn img(req: HttpRequest) -> impl Responder {
     let reader = image::io::Reader::new(io::Cursor::new(bytes))
         .with_guessed_format()
         .unwrap();
-        
     let image = match reader.decode() {
         Ok(image) => image,
         Err(_) => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),

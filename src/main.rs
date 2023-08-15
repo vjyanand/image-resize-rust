@@ -28,7 +28,7 @@ async fn main() -> std::io::Result<()> {
 
 #[get("/")]
 async fn ok() -> impl Responder {
-    HttpResponse::Ok().body("OK")
+    HttpResponse::Ok().body("Ok")
 }
 
 #[get("/img")]

@@ -1,42 +1,17 @@
-# fly.toml file generated for image-resize-rust-iavian on 2023-05-12T13:46:06+05:30
+# fly.toml app configuration file generated for image-resize-rust-iavian on 2023-08-15T07:01:54+05:30
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
 app = "image-resize-rust-iavian"
-kill_signal = "SIGINT"
-kill_timeout = 5
 primary_region = "ewr"
-processes = []
 
-[env]
+[build]
 
-[experimental]
-  allowed_public_ports = []
-  auto_rollback = true
-  cmd = []
-  entrypoint = []
-  exec = []
-
-[[services]]
-  http_checks = []
+[http_service]
   internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
   min_machines_running = 0
   processes = ["app"]
-  protocol = "tcp"
-  script_checks = []
-  [services.concurrency]
-    hard_limit = 500
-    soft_limit = 400
-    type = "connections"
-
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
-
-  [[services.tcp_checks]]
-    grace_period = "1s"
-    interval = "15s"
-    restart_limit = 0
-    timeout = "2s"

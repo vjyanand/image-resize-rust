@@ -1,15 +1,22 @@
-FROM alpine:latest
+FROM alpine:latest as builder
 
-RUN apk add --update --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/community --repository http://dl-3.alpinelinux.org/alpine/edge/main rust cargo
+RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/latest-stable/community --repository https://dl-3.alpinelinux.org/alpine/latest-stable/main rust cargo openssl-dev
 
-WORKDIR /opt/image-size
+WORKDIR /app
 
-COPY ./Cargo.toml ./Cargo.toml
-
-ADD . ./
+COPY ./ ./
 
 RUN cargo build --release
 
+FROM alpine:latest
+
+RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/latest-stable/community --repository https://dl-3.alpinelinux.org/alpine/latest-stable/main libgcc
+
+WORKDIR /app
+
+COPY --from=builder /app/target/release/image /app/image
+
 EXPOSE 8080
 
-CMD ["./target/release/image"]
+#Run the binary
+CMD ["/app/image"]

@@ -1,4 +1,3 @@
-
 use actix_web::http::StatusCode;
 use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 use bytes::Bytes;
@@ -85,7 +84,6 @@ async fn img(req: HttpRequest) -> impl Responder {
         Err(_) => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
     }
 }
-
 
 #[derive(Debug)]
 struct InvalidResponseError {

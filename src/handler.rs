@@ -79,7 +79,7 @@ async fn img(req: HttpRequest) -> impl Responder {
         Ok(_) => HttpResponse::Ok()
             .content_type("image/jpeg")
             .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-            .append_header(("Server", "iavian-img-1.1"))
+            .append_header(("x-server", "iavian-img-1.1"))
             .body(img_bytes),
         Err(_) => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
     }

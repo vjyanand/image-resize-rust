@@ -226,10 +226,11 @@ impl InvalidSizeError {
         InvalidSizeError { msg: message }
     }
 }
+
+impl Error for InvalidSizeError {}
+
 impl fmt::Display for InvalidSizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Invalid size {}", self.msg)
     }
 }
-
-impl Error for InvalidSizeError {}

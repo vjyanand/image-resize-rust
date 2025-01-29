@@ -32,13 +32,25 @@ async fn img(req: HttpRequest) -> impl Responder {
         }
     }
     println!("Resizing for url [{}]", query.url);
+    let result = resize_image(&query.url, query.w, query.h).await;
 
-    let fetch_response = fetch(&query.url).await;
+    match result {
+        Some(img_bytes) => HttpResponse::Ok()
+            .content_type("image/jpeg")
+            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+            .append_header(("x-server", "iavian-img-1.1"))
+            .body(img_bytes),
+        None => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
+    }
+}
+
+async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<Vec<u8>> {
+    let fetch_response = fetch(url).await;
     let mut bytes: Option<Bytes> = None;
     if let Ok(b) = fetch_response {
         bytes = Some(b);
     } else {
-        let url_encoded: String = byte_serialize(&query.url.as_bytes()).collect();
+        let url_encoded: String = byte_serialize(url.as_bytes()).collect();
         let url = format!("https://images.weserv.nl/?url={}", url_encoded);
         print!("Fetching from weserv {}", url);
         let fetch_response = fetch(&url).await;
@@ -48,7 +60,7 @@ async fn img(req: HttpRequest) -> impl Responder {
     }
     let bytes = match bytes {
         Some(bytes) => bytes,
-        None => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
+        None => return None,
     };
 
     let reader = image::ImageReader::new(io::Cursor::new(bytes))
@@ -56,18 +68,18 @@ async fn img(req: HttpRequest) -> impl Responder {
         .unwrap();
     let image = match reader.decode() {
         Ok(image) => image,
-        Err(_) => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
+        Err(_) => return None,
     };
 
     let desired_size = Size {
-        width: query.w,
-        height: query.h,
+        width: w,
+        height: h,
     };
 
     let resized = get_target_size(image.width(), image.height(), &desired_size);
     let resized = match resized {
         Ok(resized) => resized,
-        Err(_) => return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish(),
+        Err(_) => return None,
     };
 
     let image = image.resize(resized.0, resized.1, FilterType::Lanczos3);
@@ -75,18 +87,11 @@ async fn img(req: HttpRequest) -> impl Responder {
     let write_cursor = &mut Cursor::new(&mut img_bytes);
     let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
     let result = image.write_with_encoder(encoder);
-
-    match result {
-        Ok(_) => HttpResponse::Ok()
-            .content_type("image/jpeg")
-            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-            .append_header(("x-server", "iavian-img-1.1"))
-            .body(img_bytes),
-        Err(err) => {
-            print!("Error writing image {:?}", err);
-            HttpResponse::build(StatusCode::BAD_REQUEST).finish()
-        }
+    if let Err(err) = result {
+        print!("Error writing image {:?}", err);
+        return None;
     }
+    Some(img_bytes)
 }
 
 #[derive(Debug)]
@@ -145,9 +150,9 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
 
     let bytes = response.bytes().await;
     match bytes {
-        Ok(bytes) => return Ok(bytes),
-        Err(err) => return Err(Box::new(err)),
-    };
+        Ok(bytes) => Ok(bytes),
+        Err(err) => Err(Box::new(err)),
+    }
 }
 
 fn get_target_size(
@@ -160,7 +165,7 @@ fn get_target_size(
             width: None,
             height: None,
         } => Ok((original_width, original_height)),
-        s if is_negative_or_zero(s) => Err(InvalidSizeError::new(&desired_size)),
+        s if is_negative_or_zero(s) => Err(InvalidSizeError::new(desired_size)),
         Size {
             width: Some(w),
             height: Some(h),
@@ -203,8 +208,8 @@ fn get_target_size(
 }
 
 fn is_negative_or_zero(size: &Size) -> bool {
-    (size.height.is_some() && size.height.unwrap() <= 0)
-        || (size.width.is_some() && size.width.unwrap() <= 0)
+    (size.height.is_some() && size.height.unwrap() == 0)
+        || (size.width.is_some() && size.width.unwrap() == 0)
 }
 
 fn get_ratio(desired_measure: u32, original_measure: u32, opposite_orig_measure: u32) -> u32 {
@@ -235,5 +240,17 @@ impl Error for InvalidSizeError {}
 impl fmt::Display for InvalidSizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Invalid size {}", self.msg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_resize_image() {
+        let url = "https://npr.brightspotcdn.com/dims3/default/strip/false/crop/4000x2667+0+0/resize/4000x2667!/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2Fe4%2F43%2F9d291f74410599c8300a09139ad2%2Fgettyimages-2193336531.jpg";
+        let result = resize_image(url, Some(100), Some(100)).await;
+        assert_eq!(result.is_some(), true);
     }
 }

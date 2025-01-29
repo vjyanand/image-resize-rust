@@ -10,7 +10,7 @@ use std::env;
 async fn main() -> std::io::Result<()> {
     Builder::from_env(Env::default())
         .format_timestamp(None) // Optional: remove timestamp
-        .format_target(false) // Optional: remove target
+        //.format_target(false) // Optional: remove target
         // Enable colors
         .filter_level(log::LevelFilter::Debug)
         .write_style(env_logger::WriteStyle::Always) // Force colors

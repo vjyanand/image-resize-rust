@@ -2,6 +2,7 @@ use actix_web::http::StatusCode;
 use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 use bytes::Bytes;
 use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::{CompressionType, PngEncoder};
 use image::imageops::FilterType::{self};
 use reqwest::ClientBuilder;
 use reqwest::{self, header, redirect::Policy};
@@ -35,16 +36,20 @@ async fn img(req: HttpRequest) -> impl Responder {
     let result = resize_image(&query.url, query.w, query.h).await;
 
     match result {
-        Some(img_bytes) => HttpResponse::Ok()
-            .content_type("image/jpeg")
-            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-            .append_header(("x-server", "iavian-img-1.1"))
-            .body(img_bytes),
+        Some(img_bytes) => {
+            let (img_bytes, is_png) = img_bytes;
+            let content_type = if is_png { "image/png" } else { "image/jpeg" };
+            HttpResponse::Ok()
+                .content_type(content_type)
+                .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+                .append_header(("x-server", "iavian-img-1.1"))
+                .body(img_bytes)
+        }
         None => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
     }
 }
 
-async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<Vec<u8>> {
+async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<u8>, bool)> {
     let fetch_response = fetch(url).await;
     let mut bytes: Option<Bytes> = None;
     if let Ok(b) = fetch_response {
@@ -52,7 +57,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<Vec<u
     } else {
         let url_encoded: String = byte_serialize(url.as_bytes()).collect();
         let url = format!("https://images.weserv.nl/?url={}", url_encoded);
-        print!("Fetching from weserv {}", url);
+        println!("Fetching from weserv {}", url);
         let fetch_response = fetch(&url).await;
         if let Ok(b) = fetch_response {
             bytes = Some(b);
@@ -88,10 +93,22 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<Vec<u
     let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
     let result = image.write_with_encoder(encoder);
     if let Err(err) = result {
-        print!("Error writing image {:?}", err);
-        return None;
+        println!("Error resizing to jpeg image {} - {:?}", url, err);
+        let mut img_bytes = vec![];
+        let write_cursor = &mut Cursor::new(&mut img_bytes);
+        let encoder = PngEncoder::new_with_quality(
+            write_cursor,
+            CompressionType::Default,
+            image::codecs::png::FilterType::Adaptive,
+        );
+        let result = image.write_with_encoder(encoder);
+        if let Err(err) = result {
+            println!("Error resizing to png image {} - {:?}", url, err);
+            return None;
+        }
+        return Some((img_bytes, true));
     }
-    Some(img_bytes)
+    Some((img_bytes, false))
 }
 
 #[derive(Debug)]

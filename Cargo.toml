@@ -11,6 +11,8 @@ serde = { version = "1.0.217", features = ["derive"] }
 bytes = "1.9.0"
 url = "2.5.4"
 http = "1.2.0"
+env_logger = "0.11.6"
+log = "0.4.25"
 
 [dev-dependencies]
 tokio = { version="1.43.0", features = ["macros", "rt-multi-thread"] }

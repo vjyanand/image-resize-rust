@@ -18,6 +18,8 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/image /app/image
 
+ENV RUST_LOG=warn,reqwest=warn,hyper_util::client::legacy::connect::http=warn,hyper_util::client::legacy::pool=warn,hyper_util::client::
+   
 EXPOSE 8080
 
 #Run the binary

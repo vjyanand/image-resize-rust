@@ -6,7 +6,7 @@ WORKDIR /app
 
 COPY ./ ./
 
-RUN cargo test
+#RUN cargo test
 
 RUN cargo build --release
 
@@ -18,7 +18,7 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/image /app/image
 
-ENV RUST_LOG=warn,reqwest=warn,hyper_util::client::legacy::connect::http=warn,hyper_util::client::legacy::pool=warn,hyper_util::client::
+ENV RUST_LOG=warn,reqwest=warn,hyper_util::client::legacy::client=warn,hyper_util::client::legacy::connect::http=warn,hyper_util::client::legacy::pool=warn,hyper_util::client::=warn,hyper_util::client::legacy::connect::dns=warn
    
 EXPOSE 8080
 

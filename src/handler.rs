@@ -91,8 +91,12 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let image = image.resize(resized.0, resized.1, FilterType::Lanczos3);
     let mut img_bytes = vec![];
     let write_cursor = &mut Cursor::new(&mut img_bytes);
-    let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
-    let result = image.write_with_encoder(encoder);
+    
+    //let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
+    //let result = image.write_with_encoder(encoder);
+    
+    let result = image.write_to(write_cursor, image::ImageFormat::Jpeg);
+
     if let Err(err) = result {
         warn!("Error resizing to jpeg image {} - {:?}", url, err);
         let mut img_bytes = vec![];

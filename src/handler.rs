@@ -1,7 +1,6 @@
 use actix_web::http::StatusCode;
 use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 use bytes::Bytes;
-use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, PngEncoder};
 use image::imageops::FilterType::{self};
 use log::{debug, error, warn};

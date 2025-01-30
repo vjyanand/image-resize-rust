@@ -1,6 +1,7 @@
 use actix_web::http::StatusCode;
 use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 use bytes::Bytes;
+use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, PngEncoder};
 use image::imageops::FilterType::{self};
 use log::{debug, error, warn};
@@ -91,10 +92,10 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let mut img_bytes = vec![];
     let write_cursor = &mut Cursor::new(&mut img_bytes);
     
-    //let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
-    //let result = image.write_with_encoder(encoder);
+    let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
+    let result = image.write_with_encoder(encoder);
     
-    let result = image.write_to(write_cursor, image::ImageFormat::Jpeg);
+    //let result = image.write_to(write_cursor, image::ImageFormat::Jpeg);
 
     if let Err(err) = result {
         warn!("Failed resizing to jpeg image {} - {:?}", url, err);

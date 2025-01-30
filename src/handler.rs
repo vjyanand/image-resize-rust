@@ -98,7 +98,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let result = image.write_to(write_cursor, image::ImageFormat::Jpeg);
 
     if let Err(err) = result {
-        warn!("Error resizing to jpeg image {} - {:?}", url, err);
+        warn!("Failed resizing to jpeg image {} - {:?}", url, err);
         let mut img_bytes = vec![];
         let write_cursor = &mut Cursor::new(&mut img_bytes);
         let encoder = PngEncoder::new_with_quality(

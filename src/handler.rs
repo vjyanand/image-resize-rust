@@ -17,6 +17,23 @@ use url::form_urlencoded::byte_serialize;
 async fn ok() -> impl Responder {
     HttpResponse::Ok().body("Ok")
 }
+#[get("/favicon")]
+async fn favicon(req: HttpRequest) -> impl Responder {
+    let query = web::Query::<FavIconRequestQuery>::from_query(req.query_string()).unwrap();
+    if query.domain.is_empty() || query.domain.len() < 3 {
+        return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
+    }
+    let fetch_url = format!("https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&size=12&fallback_opts=TYPE,SIZE,URL&url=http://{}" , &query.domain);
+    let result = fetch(&fetch_url).await;
+    match result {
+        Ok(bytes) => HttpResponse::Ok()
+            .content_type("image/x-icon")
+            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+            .append_header(("x-server", "iavian-img-1.1"))
+            .body(bytes),
+        Err(_) => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
+    }
+}
 
 #[get("/img")]
 async fn img(req: HttpRequest) -> impl Responder {
@@ -91,11 +108,9 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let image = image.resize(resized.0, resized.1, FilterType::Lanczos3);
     let mut img_bytes = vec![];
     let write_cursor = &mut Cursor::new(&mut img_bytes);
-    
+
     let encoder = JpegEncoder::new_with_quality(write_cursor, 80);
     let result = image.write_with_encoder(encoder);
-    
-    //let result = image.write_to(write_cursor, image::ImageFormat::Jpeg);
 
     if let Err(err) = result {
         warn!("Failed resizing to jpeg image {} - {:?}", url, err);
@@ -134,6 +149,11 @@ struct RequestQuery {
     url: String,
     w: Option<u32>,
     h: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct FavIconRequestQuery {
+    domain: String,
 }
 
 async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {

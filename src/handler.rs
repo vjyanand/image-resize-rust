@@ -47,6 +47,7 @@ async fn img(req: HttpRequest) -> impl Responder {
         if let Ok(alt_url) = alt_url {
             query.url = alt_url;
         } else {
+            error!("Resizing for url failed [{}]", query.url);
             return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
         }
     }
@@ -63,7 +64,10 @@ async fn img(req: HttpRequest) -> impl Responder {
                 .append_header(("x-server", "iavian-img-1.1"))
                 .body(img_bytes)
         }
-        None => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
+        None => {
+            error!("Resizing for url failed [{}]", query.url);
+            HttpResponse::build(StatusCode::BAD_REQUEST).finish()
+        }
     }
 }
 

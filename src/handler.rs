@@ -31,7 +31,10 @@ async fn favicon(req: HttpRequest) -> impl Responder {
             .append_header(("Cache-Control", "public, max-age=604800, immutable"))
             .append_header(("x-server", "iavian-img-1.1"))
             .body(bytes),
-        Err(_) => HttpResponse::build(StatusCode::BAD_REQUEST).finish(),
+        Err(_) => {
+            error!("Favicon for domain failed [{}]", query.domain);
+            HttpResponse::build(StatusCode::BAD_REQUEST).finish()
+        }
     }
 }
 

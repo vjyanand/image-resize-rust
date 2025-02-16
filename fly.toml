@@ -3,6 +3,11 @@ primary_region = "ewr"
 
 [build]
 
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
+  processes = ["app"]
+
 [http_service]
   internal_port = 8080
   force_https = false

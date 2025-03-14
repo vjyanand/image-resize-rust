@@ -183,6 +183,10 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
         "Referer",
         header::HeaderValue::from_static("https://google.com"),
     );
+    headers.insert(
+        "User-Agent",
+        header::HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"),
+    );
 
     let client = ClientBuilder::new()
         .timeout(Duration::new(10, 0))

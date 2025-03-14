@@ -17,6 +17,7 @@ use url::form_urlencoded::byte_serialize;
 async fn ok() -> impl Responder {
     HttpResponse::Ok().body("Ok")
 }
+
 #[get("/favicon")]
 async fn favicon(req: HttpRequest) -> impl Responder {
     let query = web::Query::<FavIconRequestQuery>::from_query(req.query_string()).unwrap();
@@ -32,8 +33,19 @@ async fn favicon(req: HttpRequest) -> impl Responder {
             .append_header(("x-server", "iavian-img-1.1"))
             .body(bytes),
         Err(_) => {
-            error!("Favicon for domain failed [{}]", query.domain);
-            HttpResponse::build(StatusCode::BAD_REQUEST).finish()
+            let fetch_url = format!("https://www.faviconextractor.com/favicon/{}", &query.domain);
+            let result = fetch(&fetch_url).await;
+            match result {
+                Ok(bytes) => HttpResponse::Ok()
+                    .content_type("image/png")
+                    .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+                    .append_header(("x-server", "iavian-img-1.1"))
+                    .body(bytes),
+                Err(_) => {
+                    error!("Favicon for domain failed [{}]", query.domain);
+                    HttpResponse::build(StatusCode::BAD_REQUEST).finish()
+                }
+            }
         }
     }
 }

@@ -33,6 +33,7 @@ async fn favicon(req: HttpRequest) -> impl Responder {
             .append_header(("x-server", "iavian-img-1.1"))
             .body(bytes),
         Err(_) => {
+            warn!("Google Favicon for domain failed [{}]", query.domain);
             let fetch_url = format!("https://www.faviconextractor.com/favicon/{}", &query.domain);
             let result = fetch(&fetch_url).await;
             match result {
@@ -43,7 +44,7 @@ async fn favicon(req: HttpRequest) -> impl Responder {
                     .body(bytes),
                 Err(_) => {
                     error!("Favicon for domain failed [{}]", query.domain);
-                    HttpResponse::build(StatusCode::BAD_REQUEST).finish()
+                    HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
                 }
             }
         }

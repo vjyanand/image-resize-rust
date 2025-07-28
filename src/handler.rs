@@ -178,7 +178,6 @@ struct FavIconRequestQuery {
 
 async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let mut headers = header::HeaderMap::new();
-
     headers.insert(
         "Referer",
         header::HeaderValue::from_static("https://google.com"),
@@ -192,6 +191,7 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
         .timeout(Duration::new(10, 0))
         .redirect(Policy::limited(2))
         .default_headers(headers)
+        .http2_adaptive_window(true)
         .build();
 
     let client = match client {

@@ -207,14 +207,14 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let response = match response {
         Ok(r) => r,
         Err(err) => {
-            error!("Error fetching image from remote: {err}");
+            error!("Error fetching image {url} from remote: {err}");
             return Err(Box::new(err));
         }
     };
 
     if !response.status().is_success() {
         let error_string = format!(
-            "Error fetching image from remote, status code:{}",
+            "Error fetching image {url} from remote, status code:{}",
             response.status().as_str()
         );
         error!("{error_string}");

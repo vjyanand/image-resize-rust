@@ -64,7 +64,9 @@ async fn img(req: HttpRequest) -> impl Responder {
             query.url = alt_url;
         } else {
             error!("Resizing for url failed [{}]", query.url);
-            return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
+            return HttpResponse::build(StatusCode::BAD_REQUEST)
+                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
+                .finish();
         }
     }
     debug!("Resizing for url [{}]", query.url);
@@ -82,7 +84,9 @@ async fn img(req: HttpRequest) -> impl Responder {
         }
         None => {
             error!("Resizing for url failed [{}]", query.url);
-            HttpResponse::build(StatusCode::BAD_REQUEST).finish()
+            HttpResponse::build(StatusCode::BAD_REQUEST)
+                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
+                .finish()
         }
     }
 }

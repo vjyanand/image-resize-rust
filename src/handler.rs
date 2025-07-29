@@ -224,7 +224,10 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let bytes = response.bytes().await;
     match bytes {
         Ok(bytes) => Ok(bytes),
-        Err(err) => Err(Box::new(err)),
+        Err(err) => {
+            error!("Error fetching bytes {url} from response: {err}");
+            Err(Box::new(err))
+        }
     }
 }
 

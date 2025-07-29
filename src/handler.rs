@@ -63,7 +63,7 @@ async fn img(req: HttpRequest) -> impl Responder {
         if let Ok(alt_url) = alt_url {
             query.url = alt_url;
         } else {
-            error!("Resizing for url failed [{}]", query.url);
+            error!("Resizing for [{}] failed ", query.url);
             return HttpResponse::build(StatusCode::BAD_REQUEST)
                 .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
                 .finish();
@@ -83,7 +83,7 @@ async fn img(req: HttpRequest) -> impl Responder {
                 .body(img_bytes)
         }
         None => {
-            error!("Resizing for url failed [{}]", query.url);
+            error!("Resizing for [{}] failed", query.url);
             HttpResponse::build(StatusCode::BAD_REQUEST)
                 .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
                 .finish()

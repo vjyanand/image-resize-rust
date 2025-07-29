@@ -21,8 +21,8 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("PORT must be a number");
 
-    let binding_interface = format!("0.0.0.0:{}", port);
-    info!("Listening at {}", binding_interface);
+    let binding_interface = format!("0.0.0.0:{port}");
+    info!("Listening at {binding_interface}");
     HttpServer::new(|| App::new().service(ok).service(img).service(favicon))
         .bind(binding_interface)?
         .run()

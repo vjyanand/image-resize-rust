@@ -94,8 +94,8 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         bytes = Some(b);
     } else {
         let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-        let url = format!("https://images.weserv.nl/?url={}", url_encoded);
-        debug!("Fetching from weserv {}", url);
+        let url = format!("https://images.weserv.nl/?url={url_encoded}");
+        debug!("Fetching from weserv {url}");
         let fetch_response = fetch(&url).await;
         if let Ok(b) = fetch_response {
             bytes = Some(b);
@@ -133,7 +133,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let result = image.write_with_encoder(encoder);
 
     if let Err(err) = result {
-        warn!("Failed resizing to jpeg image {} - {:?}", url, err);
+        warn!("Failed resizing to jpeg image {url} - {err:?}");
         let mut img_bytes = vec![];
         let write_cursor = &mut Cursor::new(&mut img_bytes);
         let encoder = PngEncoder::new_with_quality(
@@ -143,7 +143,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         );
         let result = image.write_with_encoder(encoder);
         if let Err(err) = result {
-            error!("Error resizing to png image {} - {:?}", url, err);
+            error!("Error resizing to png image {url} - {err:?}");
             return None;
         }
         return Some((img_bytes, true));
@@ -196,14 +196,20 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
 
     let client = match client {
         Ok(client) => client,
-        Err(err) => return Err(Box::new(err)),
+        Err(err) => {
+            error!("Failed to create HTTP client: {err}");
+            return Err(Box::new(err));
+        }
     };
 
     let response = client.get(url).send().await;
 
     let response = match response {
         Ok(r) => r,
-        Err(err) => return Err(Box::new(err)),
+        Err(err) => {
+            error!("Error fetching image from remote: {err}");
+            return Err(Box::new(err));
+        }
     };
 
     if !response.status().is_success() {
@@ -211,6 +217,7 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
             "Error fetching image from remote, status code:{}",
             response.status().as_str()
         );
+        error!("{error_string}");
         return Err(Box::new(InvalidResponseError { msg: error_string }));
     }
 

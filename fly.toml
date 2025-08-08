@@ -1,33 +1,28 @@
-app = "image-resize-rust-iavian"
-primary_region = "ewr"
+app = 'image-resize-rust-iavian'
+primary_region = 'ewr'
 
 [build]
 
-[[vm]]
-  size = "shared-cpu-2x"
-  memory = "2gb"
-  processes = ["app"]
-
 [http_service]
   internal_port = 8080
-  force_https = false
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 1
-  processes = ["app"]
+  min_machines_running = 0
+  processes = ['app']
+
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 200
+    type = 'requests'
     hard_limit = 250
+    soft_limit = 200
 
-[[services.ports]]
-    handlers = ["http"]
-    port = 80
-    force_https = false  # optional
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/'
 
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/"
+[[vm]]
+  size = 'shared-cpu-2x'
+  memory = '2gb'
+  processes = ['app']

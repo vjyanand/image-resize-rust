@@ -78,6 +78,7 @@ async fn img(req: HttpRequest) -> impl Responder {
             let content_type = if is_png { "image/png" } else { "image/jpeg" };
             HttpResponse::Ok()
                 .content_type(content_type)
+                
                 .append_header(("Cache-Control", "public, max-age=604800, immutable"))
                 .append_header(("x-server", "iavian-img-1.1"))
                 .body(img_bytes)

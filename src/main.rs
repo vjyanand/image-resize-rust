@@ -1,6 +1,6 @@
 mod handler;
 
-use actix_web::{middleware::{Compress, Logger}, App, HttpServer};
+use actix_web::{App, HttpServer};
 use env_logger::{Builder, Env};
 use handler::{favicon, img, ok};
 use log::info;
@@ -23,15 +23,8 @@ async fn main() -> std::io::Result<()> {
 
     let binding_interface = format!("0.0.0.0:{port}");
     info!("Listening at {binding_interface}");
-    HttpServer::new(|| {
-        App::new()
-            .wrap(Logger::default())
-            .wrap(Compress::default())
-            .service(ok)
-            .service(img)
-            .service(favicon)
-    })
-    .bind(binding_interface)?
-    .run()
-    .await
+    HttpServer::new(|| App::new().service(ok).service(img).service(favicon))
+        .bind(binding_interface)?
+        .run()
+        .await
 }

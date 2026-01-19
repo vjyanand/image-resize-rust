@@ -86,7 +86,7 @@ async fn img(req: HttpRequest) -> impl Responder {
         }
         None => {
             error!("Resizing for [{}] failed", query.url);
-            HttpResponse::build(StatusCode::BAD_REQUEST)
+            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR)
                 .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
                 .finish()
         }
@@ -94,24 +94,22 @@ async fn img(req: HttpRequest) -> impl Responder {
 }
 
 async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<u8>, bool)> {
-    let fetch_response = fetch(url).await;
-    let mut bytes: Option<Bytes> = None;
-    if let Ok(b) = fetch_response {
-        bytes = Some(b);
-    } else {
-        let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-        let url = format!("https://expander.iavian.net/proxy?url={url_encoded}");
-        info!("Fetching from proxy {url}");
-        let fetch_response = fetch(&url).await;
-        if let Ok(b) = fetch_response {
-            bytes = Some(b);
-        } else {
-            warn!("Fetching from proxy {url} failed");
+    let bytes = match fetch(url).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            warn!("Failed fetching with err {}", err);
+            let url_encoded: String = byte_serialize(url.as_bytes()).collect();
+            let url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
+            info!("Fetching from proxy {url}");
+
+            match fetch(&url).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    warn!("Fetching from proxy {url} failed {}", err);
+                    return None;
+                }
+            }
         }
-    }
-    let bytes = match bytes {
-        Some(bytes) => bytes,
-        None => return None,
     };
 
     let reader = image::ImageReader::new(io::Cursor::new(bytes))
@@ -194,7 +192,7 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     headers.insert(
         header::USER_AGENT,
         header::HeaderValue::from_str(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
         )?,
     );
     headers.insert(
@@ -207,7 +205,7 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     );
     headers.insert(
         header::ACCEPT_ENCODING,
-        header::HeaderValue::from_static("gzip, br"),
+        header::HeaderValue::from_static("gzip, deflate, br, zstd"),
     );
     headers.insert(
         header::CONNECTION,
@@ -216,11 +214,13 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
 
     // Build HTTP client with stealthy configurations
     let client = ClientBuilder::new()
-        .timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(40))
         .redirect(Policy::limited(3)) // Allow slightly more redirects
         .default_headers(headers)
         .gzip(true) // Enable gzip compression
         .brotli(true) // Enable brotli compression
+        .zstd(true)
+        .deflate(true)
         .http2_adaptive_window(true) // Optimize HTTP/2 performance
         .build();
 
@@ -237,7 +237,7 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let response = match response {
         Ok(r) => r,
         Err(err) => {
-            warn!("Error fetching {url} from remote:{err}");
+            warn!("Error fetching {url} from remote:{err:#?}");
             return Err(Box::new(err));
         }
     };
@@ -357,6 +357,6 @@ mod tests {
     async fn test_resize_image() {
         let url = "https://www.newsmax.com/CMSPages/GetFile.aspx?guid=38174cc3-fb79-4e3e-913b-fbb991da6928&SiteName=Newsmax";
         let result = resize_image(url, Some(100), Some(100)).await;
-        assert_eq!(result.is_some(), true);
+        assert!(result.is_some());
     }
 }

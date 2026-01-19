@@ -6,18 +6,20 @@ edition = "2024"
 [dependencies]
 image = { version = "0.25.9" }
 actix-web = { version = "4.12.1", features = [
-    "compress-brotli",
-    "compress-gzip",
+  "compress-brotli",
+  "compress-gzip",
 ] }
-reqwest = { version = "0.12", default-features = false, features = [
-    "brotli",
-    "gzip",
-    "rustls-tls",
-    "http2",
+reqwest = { version = "0.13.1", default-features = false, features = [
+  "native-tls",
+  "brotli",
+  "gzip",
+  "http2",
+  "zstd",
+  "deflate",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 bytes = "1.11.0"
-url = "2.5.7"
+url = "2.5.8"
 http = "1.4.0"
 env_logger = "0.11.8"
 log = "0.4.29"

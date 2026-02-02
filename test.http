@@ -1,1 +1,4 @@
 GET http://localhost:8080/img?url=https%3A%2F%2Fmedia-cldnry.s-nbcnews.com%2Fimage%2Fupload%2Ft_nbcnews-fp-1200-630%2Cf_auto%2Cq_auto%3Abest%2Frockcms%2F2025-09%2F250909-one-time-use-charlie-kirk-obit-cs-1892f4.jpg
+
+###
+GET http://localhost:8080/dim?url=https%3A%2F%2Fmedia-cldnry.s-nbcnews.com%2Fimage%2Fupload%2Ft_nbcnews-fp-1200-630%2Cf_auto%2Cq_auto%3Abest%2Frockcms%2F2025-09%2F250909-one-time-use-charlie-kirk-obit-cs-1892f4.jpg

@@ -7,7 +7,7 @@ use image::imageops::FilterType::{self};
 use log::{debug, error, info, warn};
 use reqwest::ClientBuilder;
 use reqwest::{self, header, redirect::Policy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::{env, fmt, io};
 use std::{error::Error, time::Duration};
@@ -155,6 +155,78 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         return Some((img_bytes, true));
     }
     Some((img_bytes, false))
+}
+
+
+#[get("/dim")]
+async fn dim(req: HttpRequest) -> impl Responder {
+    let mut query = web::Query::<RequestQuery>::from_query(req.query_string()).unwrap();
+    if query.url.starts_with("//") {
+        query.url = format!("https:{}", query.url);
+    }
+
+    if !query.url.starts_with("http") {
+        let alt_url = env::var("IMAGE_FALLBACK_URL");
+        if let Ok(alt_url) = alt_url {
+            query.url = alt_url;
+        } else {
+            error!("Resizing for [{}] failed ", query.url);
+            return HttpResponse::build(StatusCode::BAD_REQUEST)
+                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
+                .finish();
+        }
+    }
+    debug!("Resizing for url [{}]", query.url);
+    let result = dimension_image(&query.url).await;
+
+    match result {
+        Some(size) => {
+            let content_type = "application/json";
+            HttpResponse::Ok()
+                .content_type(content_type)
+                .append_header(("Cache-Control", "public, max-age=604800, immutable"))
+                .append_header(("x-server", "iavian-img-1.1"))
+                .json(size)
+        }
+        None => {
+            error!("Dimension for [{}] failed", query.url);
+            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR)
+                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
+                .finish()
+        }
+    }
+}
+
+async fn dimension_image(url: &str) -> Option<Size> {
+    let bytes = match fetch(url).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            warn!("Failed fetching with err {}", err);
+            let url_encoded: String = byte_serialize(url.as_bytes()).collect();
+            let url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
+            info!("Fetching from proxy {url}");
+
+            match fetch(&url).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    warn!("Fetching from proxy {url} failed {}", err);
+                    return None;
+                }
+            }
+        }
+    };
+
+    let reader = image::ImageReader::new(io::Cursor::new(bytes))
+        .with_guessed_format()
+        .unwrap();
+    let image = match reader.decode() {
+        Ok(image) => image,
+        Err(_) => return None,
+    };
+    Some(Size {
+        height: Some(image.height()),
+        width: Some(image.width()),
+    })
 }
 
 #[derive(Debug)]
@@ -323,7 +395,7 @@ fn get_ratio(desired_measure: u32, original_measure: u32, opposite_orig_measure:
     (opposite_orig_measure as f32 * ratio) as u32
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Size {
     pub width: Option<u32>,
     pub height: Option<u32>,

@@ -2,11 +2,12 @@ mod handler;
 
 use axum::{Router, routing::get};
 use handler::{dim, favicon, img, ok};
+use lambda_http::{Error, run, tracing};
 use std::env;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Error> {
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| String::from("8080"))
         .parse()
@@ -21,16 +22,5 @@ async fn main() {
         .route("/favicon", get(favicon))
         .route("/dim", get(dim));
 
-    let listener = tokio::net::TcpListener::bind(binding_interface)
-        .await
-        .unwrap();
-
-    match axum::serve(listener, app).await {
-        Ok(_) => {
-            debug!("App Running");
-        }
-        Err(_) => {
-            warn!("App Not Running");
-        }
-    }
+    run(app).await
 }

@@ -1,62 +1,70 @@
-use actix_web::http::StatusCode;
-use actix_web::{HttpRequest, HttpResponse, Responder, get, web};
+use axum::extract::Query;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::{Json, debug_handler};
 use bytes::Bytes;
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, PngEncoder};
 use image::imageops::FilterType::{self};
-use log::{debug, error, info, warn};
 use reqwest::ClientBuilder;
 use reqwest::{self, header, redirect::Policy};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use std::{env, fmt, io};
+use std::{env, fmt};
 use std::{error::Error, time::Duration};
+use tracing::{debug, error, info, warn};
 use url::form_urlencoded::byte_serialize;
 
-#[get("/")]
-async fn ok() -> impl Responder {
-    HttpResponse::Ok().body("Ok")
+pub(crate) async fn ok() -> &'static str {
+    "Ok 🦀"
 }
 
-#[get("/favicon")]
-async fn favicon(req: HttpRequest) -> impl Responder {
-    let query = web::Query::<FavIconRequestQuery>::from_query(req.query_string()).unwrap();
+pub(crate) async fn favicon(Query(query): Query<FavIconRequestQuery>) -> impl IntoResponse {
     if query.domain.is_empty() || query.domain.len() < 3 {
-        return HttpResponse::build(StatusCode::BAD_REQUEST).finish();
+        return (StatusCode::BAD_REQUEST, "Missing domain").into_response();
     }
     let fetch_url = format!(
         "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&size=12&fallback_opts=TYPE,SIZE,URL&url=http://{}",
-        &query.domain
+        query.domain
     );
+
     let result = fetch(&fetch_url).await;
     match result {
-        Ok(bytes) => HttpResponse::Ok()
-            .content_type("image/x-icon")
-            .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-            .append_header(("x-server", "iavian-img-1.1"))
-            .body(bytes),
+        Ok(bytes) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "image/x-icon"),
+                (header::CACHE_CONTROL, "public, max-age=604800, immutable"),
+            ],
+            bytes,
+        )
+            .into_response(),
         Err(e) => {
             warn!("Google Favicon for domain failed [{}] {}", query.domain, e);
-            let fetch_url = format!("https://www.faviconextractor.com/favicon/{}", &query.domain);
+            let fetch_url = format!("https://www.faviconextractor.com/favicon/{}", query.domain);
             let result = fetch(&fetch_url).await;
             match result {
-                Ok(bytes) => HttpResponse::Ok()
-                    .content_type("image/png")
-                    .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-                    .append_header(("x-server", "iavian-img-1.1"))
-                    .body(bytes),
-                Err(e) => {
-                    error!("Favicon for domain failed [{}] {}", query.domain, e);
-                    HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).finish()
+                Ok(bytes) => (
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, "image/x-icon"),
+                        (header::CACHE_CONTROL, "public, max-age=604800, immutable"),
+                    ],
+                    bytes,
+                )
+                    .into_response(),
+                Err(e1) => {
+                    let error_msg = format!("Favicon for domain failed [{}] {}", query.domain, e1);
+                    error!(error_msg);
+                    (StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response()
                 }
             }
         }
     }
 }
 
-#[get("/img")]
-async fn img(req: HttpRequest) -> impl Responder {
-    let mut query = web::Query::<RequestQuery>::from_query(req.query_string()).unwrap();
+#[debug_handler]
+pub(crate) async fn img(Query(mut query): Query<ImgRequestQuery>) -> impl IntoResponse {
     if query.url.starts_with("//") {
         query.url = format!("https:{}", query.url);
     }
@@ -66,10 +74,17 @@ async fn img(req: HttpRequest) -> impl Responder {
         if let Ok(alt_url) = alt_url {
             query.url = alt_url;
         } else {
-            error!("Resizing for [{}] failed ", query.url);
-            return HttpResponse::build(StatusCode::BAD_REQUEST)
-                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
-                .finish();
+            let error_msg = format!("Resizing for [{}] failed ", query.url);
+            error!(error_msg);
+            return (
+                StatusCode::BAD_REQUEST,
+                [(
+                    header::CACHE_CONTROL,
+                    "public, max-age=7200, must-revalidate",
+                )],
+                error_msg,
+            )
+                .into_response();
         }
     }
     debug!("Resizing for url [{}]", query.url);
@@ -78,17 +93,28 @@ async fn img(req: HttpRequest) -> impl Responder {
     match result {
         Some((img_bytes, is_png)) => {
             let content_type = if is_png { "image/png" } else { "image/jpeg" };
-            HttpResponse::Ok()
-                .content_type(content_type)
-                .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-                .append_header(("x-server", "iavian-img-1.1"))
-                .body(img_bytes)
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::CACHE_CONTROL, "public, max-age=604800, immutable"),
+                ],
+                img_bytes,
+            )
+                .into_response()
         }
         None => {
-            error!("Resizing for [{}] failed", query.url);
-            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR)
-                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
-                .finish()
+            let error_msg = format!("Resizing for [{}] failed", query.url);
+            error!(error_msg);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(
+                    header::CACHE_CONTROL,
+                    "public, max-age=7200, must-revalidate",
+                )],
+                error_msg,
+            )
+                .into_response()
         }
     }
 }
@@ -112,7 +138,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         }
     };
 
-    let reader = image::ImageReader::new(io::Cursor::new(bytes))
+    let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .unwrap();
     let image = match reader.decode() {
@@ -157,10 +183,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     Some((img_bytes, false))
 }
 
-
-#[get("/dim")]
-async fn dim(req: HttpRequest) -> impl Responder {
-    let mut query = web::Query::<RequestQuery>::from_query(req.query_string()).unwrap();
+pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoResponse {
     if query.url.starts_with("//") {
         query.url = format!("https:{}", query.url);
     }
@@ -170,10 +193,17 @@ async fn dim(req: HttpRequest) -> impl Responder {
         if let Ok(alt_url) = alt_url {
             query.url = alt_url;
         } else {
-            error!("Resizing for [{}] failed ", query.url);
-            return HttpResponse::build(StatusCode::BAD_REQUEST)
-                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
-                .finish();
+            let error_msg = format!("Resizing for [{}] failed ", query.url);
+            error!(error_msg);
+            return (
+                StatusCode::BAD_REQUEST,
+                [(
+                    header::CACHE_CONTROL,
+                    "public, max-age=7200, must-revalidate",
+                )],
+                error_msg,
+            )
+                .into_response();
         }
     }
     debug!("Resizing for url [{}]", query.url);
@@ -182,17 +212,28 @@ async fn dim(req: HttpRequest) -> impl Responder {
     match result {
         Some(size) => {
             let content_type = "application/json";
-            HttpResponse::Ok()
-                .content_type(content_type)
-                .append_header(("Cache-Control", "public, max-age=604800, immutable"))
-                .append_header(("x-server", "iavian-img-1.1"))
-                .json(size)
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::CACHE_CONTROL, "public, max-age=604800, immutable"),
+                ],
+                Json(size),
+            )
+                .into_response()
         }
         None => {
-            error!("Dimension for [{}] failed", query.url);
-            HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR)
-                .append_header(("Cache-Control", "public, max-age=7200, must-revalidate"))
-                .finish()
+            let error_msg = format!("Dimension for [{}] failed", query.url);
+            error!(error_msg);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(
+                    header::CACHE_CONTROL,
+                    "public, max-age=7200, must-revalidate",
+                )],
+                error_msg,
+            )
+                .into_response()
         }
     }
 }
@@ -216,7 +257,7 @@ async fn dimension_image(url: &str) -> Option<Size> {
         }
     };
 
-    let reader = image::ImageReader::new(io::Cursor::new(bytes))
+    let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .unwrap();
     let image = match reader.decode() {
@@ -236,25 +277,25 @@ struct InvalidResponseError {
 
 impl fmt::Display for InvalidResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid size {}", self.msg)
+        write!(f, "Invalid response {}", self.msg)
     }
 }
 
 impl Error for InvalidResponseError {}
 
 #[derive(Deserialize)]
-struct RequestQuery {
+pub(crate) struct ImgRequestQuery {
     url: String,
     w: Option<u32>,
     h: Option<u32>,
 }
 
 #[derive(Deserialize)]
-struct FavIconRequestQuery {
+pub(crate) struct FavIconRequestQuery {
     domain: String,
 }
 
-async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
+async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     // Set up headers to mimic a real browser
     let mut headers = header::HeaderMap::new();
     headers.insert(
@@ -263,9 +304,9 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     );
     headers.insert(
         header::USER_AGENT,
-        header::HeaderValue::from_str(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
-        )?,
+        header::HeaderValue::from_static(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        ),
     );
     headers.insert(
         header::ACCEPT,
@@ -299,8 +340,9 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let client = match client {
         Ok(client) => client,
         Err(err) => {
-            error!("Failed to create HTTP client: {err}");
-            return Err(Box::new(err));
+            let error_string = format!("Failed to create HTTP client: {err}");
+            error!(error_string);
+            return Err(InvalidResponseError { msg: error_string });
         }
     };
 
@@ -309,8 +351,9 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
     let response = match response {
         Ok(r) => r,
         Err(err) => {
-            warn!("Error fetching {url} from remote:{err:#?}");
-            return Err(Box::new(err));
+            let error_string = format!("Error fetching {url} from remote:{err:#?}");
+            warn!(error_string);
+            return Err(InvalidResponseError { msg: error_string });
         }
     };
 
@@ -320,15 +363,16 @@ async fn fetch(url: &str) -> Result<Bytes, Box<dyn std::error::Error>> {
             response.status().as_str()
         );
         warn!("{error_string}");
-        return Err(Box::new(InvalidResponseError { msg: error_string }));
+        return Err(InvalidResponseError { msg: error_string });
     }
 
     let bytes = response.bytes().await;
     match bytes {
         Ok(bytes) => Ok(bytes),
         Err(err) => {
-            warn!("Error fetching bytes {url} from response: {err}");
-            Err(Box::new(err))
+            let error_string = format!("Error fetching bytes {url} from response: {err}");
+            warn!(error_string);
+            Err(InvalidResponseError { msg: error_string })
         }
     }
 }

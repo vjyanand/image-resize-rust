@@ -471,7 +471,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resize_image() {
-        let url = "https://www.newsmax.com/CMSPages/GetFile.aspx?guid=38174cc3-fb79-4e3e-913b-fbb991da6928&SiteName=Newsmax";
+        let url = "https://bigthink.com/wp-content/uploads/2019/12/origin-130.jpg";
         let result = resize_image(url, Some(100), Some(100)).await;
         assert!(result.is_some());
     }

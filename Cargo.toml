@@ -44,3 +44,7 @@ path = "src/main.rs"
 name = "lambda"
 path = "src/lambda.rs"
 required-features = ["lambda"]
+
+[profile.release]
+strip = true
+panic = "abort"

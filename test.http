@@ -1,4 +1,4 @@
-GET http://localhost:8080/img?url=https%3A%2F%2Fmedia-cldnry.s-nbcnews.com%2Fimage%2Fupload%2Ft_nbcnews-fp-1200-630%2Cf_auto%2Cq_auto%3Abest%2Frockcms%2F2025-09%2F250909-one-time-use-charlie-kirk-obit-cs-1892f4.jpg
+GET https://img.thereport.be/img?url=https://substackcdn.com/image/fetch/$s_!z82M!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F2fb7c45f-7d04-4308-a624-ef2b91e8cc8d_7477x4649.jpeg
 
 ###
-GET http://localhost:8080/dim?url=https%3A%2F%2Fmedia-cldnry.s-nbcnews.com%2Fimage%2Fupload%2Ft_nbcnews-fp-1200-630%2Cf_auto%2Cq_auto%3Abest%2Frockcms%2F2025-09%2F250909-one-time-use-charlie-kirk-obit-cs-1892f4.jpg
+GET https://img.thereport.be/dim?url=https://substackcdn.com/image/fetch/$s_!z82M!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F2fb7c45f-7d04-4308-a624-ef2b91e8cc8d_7477x4649.jpeg

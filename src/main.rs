@@ -7,6 +7,8 @@ use tracing::{debug, info, warn};
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| String::from("8080"))
         .parse()

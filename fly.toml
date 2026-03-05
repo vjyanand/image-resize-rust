@@ -23,8 +23,8 @@ primary_region = 'ewr'
     path = '/'
 
 [[vm]]
-  size = 'shared-cpu-2x'
-  memory = '2gb'
+  size = 'shared-cpu-1x'
+  memory = '256mb'
   cpu_kind = 'shared'
   cpus = 2
   processes = ['app']

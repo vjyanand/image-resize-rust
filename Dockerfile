@@ -1,6 +1,6 @@
 FROM alpine:latest AS builder
 
-RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/latest-stable/community --repository https://dl-3.alpinelinux.org/alpine/latest-stable/main rust cargo openssl-dev
+RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/latest-stable/community --repository https://dl-3.alpinelinux.org/alpine/latest-stable/main rust cargo openssl-dev dav1d-dev
 
 WORKDIR /opt/breaking
 
@@ -21,13 +21,15 @@ RUN touch src/main.rs && cargo build --release
 
 FROM alpine:latest
 
-RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/latest-stable/community --repository https://dl-3.alpinelinux.org/alpine/latest-stable/main libgcc
+RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine/latest-stable/community --repository https://dl-3.alpinelinux.org/alpine/latest-stable/main libgcc dav1d
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/image /app/image
+COPY --from=builder /opt/breaking/target/release/image /app/image
 
-ENV RUST_LOG=info,reqwest=warn,hyper_util::client::legacy::client=warn,hyper_util::client::legacy::connect::http=warn,hyper_util::client::legacy::pool=warn,hyper_util::client::=warn,hyper_util::client::legacy::connect::dns=warn
+ENV FALL_BACK_URL=https://webkit.extruct.iavian.net/webkit/proxy_basic?url=
+
+ENV RUST_LOG=image=debug
    
 EXPOSE 8080
 

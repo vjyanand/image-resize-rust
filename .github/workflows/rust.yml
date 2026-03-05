@@ -19,13 +19,13 @@ jobs:
     - name: Install dependencies
       run: |
         apk update
-        apk add curl build-base pkgconf openssl-dev
+        apk add curl build-base pkgconf openssl-dev dav1d-dev
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         
     - name: Build
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --release
+        cargo build --release --bin image
         
     - name: Upload binary artifact
       uses: actions/upload-artifact@v4

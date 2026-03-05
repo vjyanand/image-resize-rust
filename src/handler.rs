@@ -125,7 +125,11 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         Err(err) => {
             warn!("Failed fetching with err {}", err);
             let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-            let url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
+            let Ok(fall_back_url) = env::var("FALL_BACK_URL") else {
+                warn!("No fall back url set");
+                return None;
+            };
+            let url = format!("{fall_back_url}{url_encoded}");
             info!("Fetching from proxy {url}");
 
             match fetch(&url).await {
@@ -143,7 +147,10 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         .unwrap();
     let image = match reader.decode() {
         Ok(image) => image,
-        Err(_) => return None,
+        Err(e) => {
+            warn!("Image decode error: {}", e);
+            return None;
+        }
     };
 
     let desired_size = Size {
@@ -154,7 +161,10 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let resized = get_target_size(image.width(), image.height(), &desired_size);
     let resized = match resized {
         Ok(resized) => resized,
-        Err(_) => return None,
+        Err(e) => {
+            warn!("Image resize error: {}", e);
+            return None;
+        }
     };
 
     let image = image.resize(resized.0, resized.1, FilterType::Lanczos3);
@@ -206,7 +216,7 @@ pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
                 .into_response();
         }
     }
-    debug!("Resizing for url [{}]", query.url);
+    debug!("Dimension for url [{}]", query.url);
     let result = dimension_image(&query.url).await;
 
     match result {
@@ -244,7 +254,11 @@ async fn dimension_image(url: &str) -> Option<Size> {
         Err(err) => {
             warn!("Failed fetching with err {}", err);
             let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-            let url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
+            let Ok(fall_back_url) = env::var("FALL_BACK_URL") else {
+                warn!("No fall back url set");
+                return None;
+            };
+            let url = format!("{fall_back_url}{url_encoded}");
             info!("Fetching from proxy {url}");
 
             match fetch(&url).await {

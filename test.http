@@ -1,4 +1,8 @@
-GET https://img.thereport.be/img?url=https://substackcdn.com/image/fetch/$s_!z82M!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F2fb7c45f-7d04-4308-a624-ef2b91e8cc8d_7477x4649.jpeg
+###
+GET http://localhost:8081/img?url=https://media.defense.gov/2020/Mar/12/2002263994/1920/1080/0/200312-A-BS728-001.PNG
+
+###
+GET https://img.thereport.be/img?f=3&url=https://media.defense.gov/2020/Mar/12/2002263994/1920/1080/0/200312-A-BS728-001.PNG
 
 ###
 GET https://img.thereport.be/dim?url=https://substackcdn.com/image/fetch/$s_!z82M!,w_1200,h_675,c_fill,f_jpg,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F2fb7c45f-7d04-4308-a624-ef2b91e8cc8d_7477x4649.jpeg

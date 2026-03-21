@@ -29,7 +29,7 @@ COPY --from=builder /opt/breaking/target/release/image /app/image
 
 ENV FALL_BACK_URL=https://webkit.extruct.iavian.net/webkit/proxy_basic?url=
 
-ENV RUST_LOG=image=debug
+ENV RUST_LOG=image=info
    
 EXPOSE 8080
 

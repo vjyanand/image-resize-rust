@@ -23,9 +23,10 @@ pub(crate) async fn favicon(Query(query): Query<FavIconRequestQuery>) -> impl In
     if query.domain.is_empty() || query.domain.len() < 3 {
         return (StatusCode::BAD_REQUEST, "Missing domain").into_response();
     }
+    let domain_encoded: String = byte_serialize(query.domain.as_bytes()).collect();
     let fetch_url = format!(
         "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&size=12&fallback_opts=TYPE,SIZE,URL&url=http://{}",
-        query.domain
+        domain_encoded
     );
 
     let result = fetch(&fetch_url).await;
@@ -41,7 +42,10 @@ pub(crate) async fn favicon(Query(query): Query<FavIconRequestQuery>) -> impl In
             .into_response(),
         Err(e) => {
             warn!("Google Favicon for domain failed [{}] {}", query.domain, e);
-            let fetch_url = format!("https://www.faviconextractor.com/favicon/{}", query.domain);
+            let fetch_url = format!(
+                "https://www.faviconextractor.com/favicon/{}",
+                domain_encoded
+            );
             let result = fetch(&fetch_url).await;
             match result {
                 Ok(bytes) => (
@@ -120,31 +124,7 @@ pub(crate) async fn img(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
 }
 
 async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<u8>, bool)> {
-    let bytes = match fetch(url).await {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            warn!("Failed fetching with err {}", err);
-            let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-            let url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
-            info!("Fetching from proxy {url}");
-
-            match fetch(&url).await {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    warn!("Fetching from proxy {url} failed {}", err);
-                    return None;
-                }
-            }
-        }
-    };
-
-    let reader = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .unwrap();
-    let image = match reader.decode() {
-        Ok(image) => image,
-        Err(_) => return None,
-    };
+    let image = fetch_image(url).await?;
 
     let desired_size = Size {
         width: w,
@@ -239,31 +219,7 @@ pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
 }
 
 async fn dimension_image(url: &str) -> Option<Size> {
-    let bytes = match fetch(url).await {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            warn!("Failed fetching with err {}", err);
-            let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-            let url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
-            info!("Fetching from proxy {url}");
-
-            match fetch(&url).await {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    warn!("Fetching from proxy {url} failed {}", err);
-                    return None;
-                }
-            }
-        }
-    };
-
-    let reader = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .unwrap();
-    let image = match reader.decode() {
-        Ok(image) => image,
-        Err(_) => return None,
-    };
+    let image = fetch_image(url).await?;
     Some(Size {
         height: Some(image.height()),
         width: Some(image.width()),
@@ -377,6 +333,45 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     }
 }
 
+/// Fetches and decodes an image, falling back to the proxy whenever the direct
+/// response cannot be fetched *or* cannot be decoded. Sites that block us often
+/// answer with a 200 HTML page, so a decode failure needs the fallback too.
+async fn fetch_image(url: &str) -> Option<image::DynamicImage> {
+    match fetch(url).await {
+        Ok(bytes) => match decode_image(bytes) {
+            Some(image) => return Some(image),
+            None => warn!("Failed decoding image from {url}"),
+        },
+        Err(err) => warn!("Failed fetching with err {}", err),
+    }
+
+    let url_encoded: String = byte_serialize(url.as_bytes()).collect();
+    let proxy_url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
+    info!("Fetching from proxy {proxy_url}");
+
+    match fetch(&proxy_url).await {
+        Ok(bytes) => match decode_image(bytes) {
+            Some(image) => Some(image),
+            None => {
+                warn!("Failed decoding image from proxy {proxy_url}");
+                None
+            }
+        },
+        Err(err) => {
+            warn!("Fetching from proxy {proxy_url} failed {}", err);
+            None
+        }
+    }
+}
+
+fn decode_image(bytes: Bytes) -> Option<image::DynamicImage> {
+    image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()
+}
+
 fn get_target_size(
     original_width: u32,
     original_height: u32,
@@ -452,7 +447,7 @@ struct InvalidSizeError {
 
 impl InvalidSizeError {
     pub fn new(size: &Size) -> InvalidSizeError {
-        let message = format!("Size {:?} is not valid.", &size);
+        let message = format!("Size {:?} is not valid.", size);
         InvalidSizeError { msg: message }
     }
 }

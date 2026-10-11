@@ -6,14 +6,18 @@ use bytes::Bytes;
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::{CompressionType, PngEncoder};
 use image::imageops::FilterType::{self};
-use reqwest::ClientBuilder;
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::{self, header, redirect::Policy};
+use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::LazyLock;
 use std::{env, fmt};
 use std::{error::Error, time::Duration};
 use tracing::{debug, error, info, warn};
 use url::form_urlencoded::byte_serialize;
+use url::{Host, Url};
 
 pub(crate) async fn ok() -> &'static str {
     "Ok 🦀"
@@ -219,10 +223,10 @@ pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
 }
 
 async fn dimension_image(url: &str) -> Option<Size> {
-    let image = fetch_image(url).await?;
+    let (width, height) = fetch_and_parse(url, read_dimensions).await?;
     Some(Size {
-        height: Some(image.height()),
-        width: Some(image.width()),
+        height: Some(height),
+        width: Some(width),
     })
 }
 
@@ -251,7 +255,11 @@ pub(crate) struct FavIconRequestQuery {
     domain: String,
 }
 
-async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
+/// Shared across requests so connections, TLS sessions and the loaded root
+/// certificates are reused instead of rebuilt for every fetch.
+static CLIENT: LazyLock<reqwest::Result<Client>> = LazyLock::new(build_client);
+
+fn build_client() -> reqwest::Result<Client> {
     // Set up headers to mimic a real browser
     let mut headers = header::HeaderMap::new();
     headers.insert(
@@ -272,28 +280,37 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
         header::ACCEPT_LANGUAGE,
         header::HeaderValue::from_static("en-US,en;q=0.9"),
     );
-    headers.insert(
-        header::ACCEPT_ENCODING,
-        header::HeaderValue::from_static("gzip, deflate, br, zstd"),
-    );
-    headers.insert(
-        header::CONNECTION,
-        header::HeaderValue::from_static("keep-alive"),
-    );
 
     // Build HTTP client with stealthy configurations
-    let client = ClientBuilder::new()
+    ClientBuilder::new()
         .timeout(Duration::from_secs(40))
-        .redirect(Policy::limited(3)) // Allow slightly more redirects
+        .redirect(Policy::custom(|attempt| {
+            if attempt.previous().len() >= 3 {
+                attempt.error("too many redirects")
+            } else if !is_allowed_url(attempt.url()) {
+                attempt.error("redirect to a non-public address")
+            } else {
+                attempt.follow()
+            }
+        }))
+        .dns_resolver(PublicOnlyResolver)
         .default_headers(headers)
         .gzip(true) // Enable gzip compression
         .brotli(true) // Enable brotli compression
         .zstd(true)
         .deflate(true)
         .http2_adaptive_window(true) // Optimize HTTP/2 performance
-        .build();
+        .build()
+}
 
-    let client = match client {
+async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
+    if !Url::parse(url).is_ok_and(|u| is_allowed_url(&u)) {
+        let error_string = format!("Refusing to fetch {url}: not a public http(s) url");
+        warn!(error_string);
+        return Err(InvalidResponseError { msg: error_string });
+    }
+
+    let client = match CLIENT.as_ref() {
         Ok(client) => client,
         Err(err) => {
             let error_string = format!("Failed to create HTTP client: {err}");
@@ -333,13 +350,23 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     }
 }
 
-/// Fetches and decodes an image, falling back to the proxy whenever the direct
-/// response cannot be fetched *or* cannot be decoded. Sites that block us often
-/// answer with a 200 HTML page, so a decode failure needs the fallback too.
 async fn fetch_image(url: &str) -> Option<image::DynamicImage> {
+    fetch_and_parse(url, decode_image).await
+}
+
+/// Fetches `url` and runs `parse` on the body, falling back to the proxy whenever
+/// the direct response cannot be fetched *or* cannot be parsed. Sites that block
+/// us often answer with a 200 HTML page, so a parse failure needs the fallback too.
+async fn fetch_and_parse<T>(url: &str, parse: impl Fn(Bytes) -> Option<T>) -> Option<T> {
+    // Don't hand blocked urls to the proxy either, it would fetch them for us.
+    if !Url::parse(url).is_ok_and(|u| is_allowed_url(&u)) {
+        warn!("Refusing to fetch {url}: not a public http(s) url");
+        return None;
+    }
+
     match fetch(url).await {
-        Ok(bytes) => match decode_image(bytes) {
-            Some(image) => return Some(image),
+        Ok(bytes) => match parse(bytes) {
+            Some(parsed) => return Some(parsed),
             None => warn!("Failed decoding image from {url}"),
         },
         Err(err) => warn!("Failed fetching with err {}", err),
@@ -350,8 +377,8 @@ async fn fetch_image(url: &str) -> Option<image::DynamicImage> {
     info!("Fetching from proxy {proxy_url}");
 
     match fetch(&proxy_url).await {
-        Ok(bytes) => match decode_image(bytes) {
-            Some(image) => Some(image),
+        Ok(bytes) => match parse(bytes) {
+            Some(parsed) => Some(parsed),
             None => {
                 warn!("Failed decoding image from proxy {proxy_url}");
                 None
@@ -369,6 +396,15 @@ fn decode_image(bytes: Bytes) -> Option<image::DynamicImage> {
         .with_guessed_format()
         .ok()?
         .decode()
+        .ok()
+}
+
+/// Reads only the image header, without decoding any pixels.
+fn read_dimensions(bytes: Bytes) -> Option<(u32, u32)> {
+    image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
         .ok()
 }
 
@@ -431,7 +467,79 @@ fn is_negative_or_zero(size: &Size) -> bool {
 
 fn get_ratio(desired_measure: u32, original_measure: u32, opposite_orig_measure: u32) -> u32 {
     let ratio = desired_measure as f32 / original_measure as f32;
-    (opposite_orig_measure as f32 * ratio) as u32
+    ((opposite_orig_measure as f32 * ratio) as u32).max(1)
+}
+
+/// Only plain http(s) urls whose host is a public name or public IP literal.
+/// Names are checked again after DNS resolution by `PublicOnlyResolver`.
+fn is_allowed_url(url: &Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    match url.host() {
+        Some(Host::Domain(d)) => {
+            let d = d.trim_end_matches('.').to_ascii_lowercase();
+            d != "localhost" && !d.ends_with(".localhost") && !d.ends_with(".internal")
+        }
+        Some(Host::Ipv4(ip)) => is_public_ip(IpAddr::V4(ip)),
+        Some(Host::Ipv6(ip)) => is_public_ip(IpAddr::V6(ip)),
+        None => false,
+    }
+}
+
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_public_ipv4(ip),
+        IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
+            Some(v4) => is_public_ipv4(v4),
+            None => is_public_ipv6(ip),
+        },
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !(ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_multicast()
+        || a == 0 // 0.0.0.0/8
+        || (a == 100 && (b & 0xc0) == 64) // 100.64.0.0/10 carrier-grade NAT
+        || (a == 192 && b == 0 && c == 0) // 192.0.0.0/24
+        || (a == 198 && (b & 0xfe) == 18) // 198.18.0.0/15 benchmarking
+        || a >= 240) // 240.0.0.0/4 reserved
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    !(ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_multicast()
+        || ip.is_unique_local() // fc00::/7, includes Fly's fdaa:: private network
+        || ip.is_unicast_link_local()
+        || (ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8)) // documentation
+}
+
+/// DNS resolver that drops non-public addresses, so a public-looking hostname
+/// can't be pointed at internal services (metadata endpoints, private network).
+struct PublicOnlyResolver;
+
+impl Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: Name) -> Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| is_public_ip(addr.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(format!("{host} does not resolve to a public address").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as Addrs)
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -464,7 +572,145 @@ impl fmt::Display for InvalidSizeError {
 mod tests {
     use super::*;
 
+    fn size(width: Option<u32>, height: Option<u32>) -> Size {
+        Size { width, height }
+    }
+
+    #[test]
+    fn target_size_no_dimensions_keeps_original() {
+        assert_eq!(
+            get_target_size(800, 600, &size(None, None)).unwrap(),
+            (800, 600)
+        );
+    }
+
+    #[test]
+    fn target_size_rejects_zero() {
+        assert!(get_target_size(800, 600, &size(Some(0), None)).is_err());
+        assert!(get_target_size(800, 600, &size(None, Some(0))).is_err());
+        assert!(get_target_size(800, 600, &size(Some(100), Some(0))).is_err());
+    }
+
+    #[test]
+    fn target_size_width_only() {
+        assert_eq!(
+            get_target_size(800, 600, &size(Some(400), None)).unwrap(),
+            (400, 300)
+        );
+        // Never upscales.
+        assert_eq!(
+            get_target_size(800, 600, &size(Some(1600), None)).unwrap(),
+            (800, 600)
+        );
+    }
+
+    #[test]
+    fn target_size_height_only() {
+        assert_eq!(
+            get_target_size(800, 600, &size(None, Some(300))).unwrap(),
+            (400, 300)
+        );
+        assert_eq!(
+            get_target_size(800, 600, &size(None, Some(1200))).unwrap(),
+            (800, 600)
+        );
+    }
+
+    #[test]
+    fn target_size_both_fits_inside_box() {
+        // Height is the tighter constraint.
+        assert_eq!(
+            get_target_size(800, 600, &size(Some(400), Some(150))).unwrap(),
+            (200, 150)
+        );
+        // Width is the tighter constraint.
+        assert_eq!(
+            get_target_size(800, 600, &size(Some(100), Some(300))).unwrap(),
+            (100, 75)
+        );
+        // Both larger than the original.
+        assert_eq!(
+            get_target_size(800, 600, &size(Some(1000), Some(1000))).unwrap(),
+            (800, 600)
+        );
+    }
+
+    #[test]
+    fn target_size_never_zero_for_extreme_aspect_ratio() {
+        assert_eq!(
+            get_target_size(10000, 5, &size(Some(10), None)).unwrap(),
+            (10, 1)
+        );
+        assert_eq!(
+            get_target_size(5, 10000, &size(None, Some(10))).unwrap(),
+            (1, 10)
+        );
+    }
+
+    fn encoded(format: image::ImageFormat) -> Bytes {
+        let mut buf = Vec::new();
+        image::DynamicImage::new_rgb8(37, 21)
+            .write_to(&mut Cursor::new(&mut buf), format)
+            .unwrap();
+        Bytes::from(buf)
+    }
+
+    #[test]
+    fn read_dimensions_from_header() {
+        for format in [image::ImageFormat::Jpeg, image::ImageFormat::Png] {
+            assert_eq!(read_dimensions(encoded(format)), Some((37, 21)));
+        }
+        assert_eq!(
+            read_dimensions(Bytes::from_static(b"<html>blocked</html>")),
+            None
+        );
+    }
+
+    fn allowed(url: &str) -> bool {
+        Url::parse(url).is_ok_and(|u| is_allowed_url(&u))
+    }
+
+    #[test]
+    fn allows_public_urls() {
+        assert!(allowed("https://example.com/a.jpg"));
+        assert!(allowed("http://93.184.216.34/a.jpg"));
+        assert!(allowed("http://[2606:2800:220:1::]/a.jpg"));
+    }
+
+    #[test]
+    fn blocks_internal_urls() {
+        for url in [
+            "ftp://example.com/a.jpg",
+            "file:///etc/passwd",
+            "http://localhost:8080/",
+            "http://foo.localhost/",
+            "http://LOCALHOST./",
+            "http://_api.internal/",
+            "http://127.0.0.1/",
+            "http://2130706433/", // 127.0.0.1 as a decimal integer
+            "http://0.0.0.0/",
+            "http://10.0.0.1/",
+            "http://172.16.0.1/",
+            "http://192.168.1.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://100.64.0.1/",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://[fdaa::3]/",
+            "http://[fe80::1]/",
+        ] {
+            assert!(!allowed(url), "{url} should be blocked");
+        }
+    }
+
     #[tokio::test]
+    async fn resolver_filters_private_addresses() {
+        let name: Name = "localhost".parse().unwrap();
+        assert!(PublicOnlyResolver.resolve(name).await.is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs network access"]
     async fn test_resize_image() {
         let url = "https://bigthink.com/wp-content/uploads/2019/12/origin-130.jpg";
         let result = resize_image(url, Some(100), Some(100)).await;

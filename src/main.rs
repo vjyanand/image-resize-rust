@@ -4,9 +4,16 @@ use axum::{Router, routing::get};
 use handler::{dim, favicon, img, ok};
 use std::env;
 use tracing::{debug, info, warn};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| String::from("8080"))
         .parse()

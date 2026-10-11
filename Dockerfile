@@ -5,7 +5,7 @@ RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine
 WORKDIR /opt/breaking
 
 # Copy Cargo files for caching
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock* ./
 
 # Dummy src for deps
 RUN mkdir src && echo "fn main() {}" > src/main.rs
@@ -25,7 +25,7 @@ RUN apk add --update --no-cache --repository https://dl-3.alpinelinux.org/alpine
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/image /app/image
+COPY --from=builder /opt/breaking/target/release/image /app/image
 
 ENV RUST_LOG=info,reqwest=warn,hyper_util::client::legacy::client=warn,hyper_util::client::legacy::connect::http=warn,hyper_util::client::legacy::pool=warn,hyper_util::client::=warn,hyper_util::client::legacy::connect::dns=warn
    

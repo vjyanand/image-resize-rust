@@ -265,7 +265,7 @@ async fn fetch_remote_dimensions(url: &str) -> Option<(u32, u32)> {
             parsed
         }
         Err(err) => {
-            warn!("Fetching dimensions from {dim_url} failed: {}", err);
+            warn!("Dimensions fallback failed: {}", err);
             None
         }
     }
@@ -438,7 +438,7 @@ async fn fetch_and_parse<T>(url: &str, parse: impl Fn(Bytes) -> Option<T>) -> Op
             }
         },
         Err(err) => {
-            warn!("Fetching from proxy {proxy_url} failed: {}", err);
+            warn!("Proxy fetch failed: {}", err);
             None
         }
     }

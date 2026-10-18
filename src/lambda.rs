@@ -1,7 +1,7 @@
 mod handler;
 
 use axum::{Router, routing::get};
-use handler::{dim, favicon, img, ok};
+use handler::{dim, favicon, img, log_env, ok};
 use lambda_http::{Error, run, tracing};
 use std::env;
 use tracing::info;
@@ -9,6 +9,8 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing::init_default_subscriber();
+
+    log_env();
 
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| String::from("8080"))

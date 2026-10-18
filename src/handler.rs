@@ -19,6 +19,23 @@ use tracing::{debug, error, info, warn};
 use url::form_urlencoded::byte_serialize;
 use url::{Host, Url};
 
+/// Every env variable the service reads, with what happens when it is unset.
+const ENV_VARS: &[(&str, &str)] = &[
+    ("PORT", "defaults to 8080"),
+    ("RUST_LOG", "defaults to info"),
+    ("IMAGE_FALLBACK_URL", "proxy fallback disabled"),
+    ("DIM_FALLBACK_URL", "remote dimensions fallback disabled"),
+];
+
+pub(crate) fn log_env() {
+    for (name, unset) in ENV_VARS {
+        match env::var(name) {
+            Ok(value) => info!("env {name}={value}"),
+            Err(_) => info!("env {name} not set, {unset}"),
+        }
+    }
+}
+
 pub(crate) async fn ok() -> &'static str {
     "Ok 🦀"
 }
@@ -45,7 +62,7 @@ pub(crate) async fn favicon(Query(query): Query<FavIconRequestQuery>) -> impl In
         )
             .into_response(),
         Err(e) => {
-            warn!("Google Favicon for domain failed [{}] {}", query.domain, e);
+            warn!("Google favicon for domain [{}] failed: {}", query.domain, e);
             let fetch_url = format!(
                 "https://www.faviconextractor.com/favicon/{}",
                 domain_encoded
@@ -62,8 +79,8 @@ pub(crate) async fn favicon(Query(query): Query<FavIconRequestQuery>) -> impl In
                 )
                     .into_response(),
                 Err(e1) => {
-                    let error_msg = format!("Favicon for domain failed [{}] {}", query.domain, e1);
-                    error!(error_msg);
+                    let error_msg = format!("Favicon for domain [{}] failed: {}", query.domain, e1);
+                    error!("{error_msg}");
                     (StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response()
                 }
             }
@@ -78,24 +95,19 @@ pub(crate) async fn img(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
     }
 
     if !query.url.starts_with("http") {
-        let alt_url = env::var("IMAGE_FALLBACK_URL");
-        if let Ok(alt_url) = alt_url {
-            query.url = alt_url;
-        } else {
-            let error_msg = format!("Resizing for [{}] failed ", query.url);
-            error!(error_msg);
-            return (
-                StatusCode::BAD_REQUEST,
-                [(
-                    header::CACHE_CONTROL,
-                    "public, max-age=7200, must-revalidate",
-                )],
-                error_msg,
-            )
-                .into_response();
-        }
+        let error_msg = format!("Invalid url [{}], expected http(s)", query.url);
+        error!("{error_msg}");
+        return (
+            StatusCode::BAD_REQUEST,
+            [(
+                header::CACHE_CONTROL,
+                "public, max-age=7200, must-revalidate",
+            )],
+            error_msg,
+        )
+            .into_response();
     }
-    debug!("Resizing for url [{}]", query.url);
+    debug!("Resizing url [{}]", query.url);
     let result = resize_image(&query.url, query.w, query.h).await;
 
     match result {
@@ -113,7 +125,7 @@ pub(crate) async fn img(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
         }
         None => {
             let error_msg = format!("Resizing for [{}] failed", query.url);
-            error!(error_msg);
+            error!("{error_msg}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(
@@ -138,7 +150,10 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let resized = get_target_size(image.width(), image.height(), &desired_size);
     let resized = match resized {
         Ok(resized) => resized,
-        Err(_) => return None,
+        Err(err) => {
+            warn!("Not resizing {url}: {err}");
+            return None;
+        }
     };
 
     let image = image.resize(resized.0, resized.1, FilterType::Lanczos3);
@@ -149,7 +164,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
     let result = image.write_with_encoder(encoder);
 
     if let Err(err) = result {
-        warn!("Failed resizing to jpeg image {url} - {err:?}");
+        warn!("Failed encoding {url} as jpeg, trying png: {err}");
         let mut img_bytes = vec![];
         let write_cursor = &mut Cursor::new(&mut img_bytes);
         let encoder = PngEncoder::new_with_quality(
@@ -159,7 +174,7 @@ async fn resize_image(url: &str, w: Option<u32>, h: Option<u32>) -> Option<(Vec<
         );
         let result = image.write_with_encoder(encoder);
         if let Err(err) = result {
-            error!("Error resizing to png image {url} - {err:?}");
+            error!("Failed encoding {url} as png: {err}");
             return None;
         }
         return Some((img_bytes, true));
@@ -173,24 +188,19 @@ pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
     }
 
     if !query.url.starts_with("http") {
-        let alt_url = env::var("IMAGE_FALLBACK_URL");
-        if let Ok(alt_url) = alt_url {
-            query.url = alt_url;
-        } else {
-            let error_msg = format!("Resizing for [{}] failed ", query.url);
-            error!(error_msg);
-            return (
-                StatusCode::BAD_REQUEST,
-                [(
-                    header::CACHE_CONTROL,
-                    "public, max-age=7200, must-revalidate",
-                )],
-                error_msg,
-            )
-                .into_response();
-        }
+        let error_msg = format!("Invalid url [{}], expected http(s)", query.url);
+        error!("{error_msg}");
+        return (
+            StatusCode::BAD_REQUEST,
+            [(
+                header::CACHE_CONTROL,
+                "public, max-age=7200, must-revalidate",
+            )],
+            error_msg,
+        )
+            .into_response();
     }
-    debug!("Resizing for url [{}]", query.url);
+    debug!("Reading dimensions for url [{}]", query.url);
     let result = dimension_image(&query.url).await;
 
     match result {
@@ -207,8 +217,8 @@ pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
                 .into_response()
         }
         None => {
-            let error_msg = format!("Dimension for [{}] failed", query.url);
-            error!(error_msg);
+            let error_msg = format!("Dimensions for [{}] failed", query.url);
+            error!("{error_msg}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(
@@ -223,11 +233,53 @@ pub(crate) async fn dim(Query(mut query): Query<ImgRequestQuery>) -> impl IntoRe
 }
 
 async fn dimension_image(url: &str) -> Option<Size> {
-    let (width, height) = fetch_and_parse(url, read_dimensions).await?;
+    let (width, height) = match fetch_and_parse(url, read_dimensions).await {
+        Some(dims) => dims,
+        None => fetch_remote_dimensions(url).await?,
+    };
     Some(Size {
         height: Some(height),
         width: Some(width),
     })
+}
+
+/// Last resort for `/dim`: asks the webkit service, which renders the image in a
+/// real browser, for its dimensions. It answers `{ "width": .., "height": .. }`.
+/// `DIM_FALLBACK_URL` is the service prefix the encoded url is appended to,
+/// e.g. `https://open.webkit.iavian.net/image?url=`; unset disables the fallback.
+async fn fetch_remote_dimensions(url: &str) -> Option<(u32, u32)> {
+    let Ok(dim_base_url) = env::var("DIM_FALLBACK_URL") else {
+        debug!("DIM_FALLBACK_URL not set, skipping remote dimensions for {url}");
+        return None;
+    };
+    let url_encoded: String = byte_serialize(url.as_bytes()).collect();
+    let dim_url = format!("{dim_base_url}{url_encoded}");
+    info!("Fetching dimensions from {dim_url}");
+
+    match fetch(&dim_url).await {
+        Ok(bytes) => {
+            let parsed = parse_remote_dimensions(&bytes);
+            if parsed.is_none() {
+                warn!("Failed parsing dimensions from {dim_url}");
+            }
+            parsed
+        }
+        Err(err) => {
+            warn!("Fetching dimensions from {dim_url} failed: {}", err);
+            None
+        }
+    }
+}
+
+fn parse_remote_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    #[derive(Deserialize)]
+    struct RemoteDimensions {
+        width: u32,
+        height: u32,
+    }
+
+    let dims: RemoteDimensions = serde_json::from_slice(bytes).ok()?;
+    (dims.width > 0 && dims.height > 0).then_some((dims.width, dims.height))
 }
 
 #[derive(Debug)]
@@ -237,7 +289,7 @@ struct InvalidResponseError {
 
 impl fmt::Display for InvalidResponseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid response {}", self.msg)
+        write!(f, "{}", self.msg)
     }
 }
 
@@ -306,7 +358,7 @@ fn build_client() -> reqwest::Result<Client> {
 async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     if !Url::parse(url).is_ok_and(|u| is_allowed_url(&u)) {
         let error_string = format!("Refusing to fetch {url}: not a public http(s) url");
-        warn!(error_string);
+        warn!("{error_string}");
         return Err(InvalidResponseError { msg: error_string });
     }
 
@@ -314,7 +366,7 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
         Ok(client) => client,
         Err(err) => {
             let error_string = format!("Failed to create HTTP client: {err}");
-            error!(error_string);
+            error!("{error_string}");
             return Err(InvalidResponseError { msg: error_string });
         }
     };
@@ -324,15 +376,15 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     let response = match response {
         Ok(r) => r,
         Err(err) => {
-            let error_string = format!("Error fetching {url} from remote:{err:#?}");
-            warn!(error_string);
+            let error_string = format!("Error fetching {url}: {err:?}");
+            warn!("{error_string}");
             return Err(InvalidResponseError { msg: error_string });
         }
     };
 
     if !response.status().is_success() {
         let error_string = format!(
-            "Error fetching {url} from remote, status code:{}",
+            "Error fetching {url}: status code {}",
             response.status().as_str()
         );
         warn!("{error_string}");
@@ -343,8 +395,8 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     match bytes {
         Ok(bytes) => Ok(bytes),
         Err(err) => {
-            let error_string = format!("Error fetching bytes {url} from response: {err}");
-            warn!(error_string);
+            let error_string = format!("Error reading body of {url}: {err}");
+            warn!("{error_string}");
             Err(InvalidResponseError { msg: error_string })
         }
     }
@@ -357,6 +409,8 @@ async fn fetch_image(url: &str) -> Option<image::DynamicImage> {
 /// Fetches `url` and runs `parse` on the body, falling back to the proxy whenever
 /// the direct response cannot be fetched *or* cannot be parsed. Sites that block
 /// us often answer with a 200 HTML page, so a parse failure needs the fallback too.
+/// `IMAGE_FALLBACK_URL` is the proxy prefix the encoded url is appended to,
+/// e.g. `https://webkit.extruct.iavian.net/webkit/proxy?url=`; unset disables it.
 async fn fetch_and_parse<T>(url: &str, parse: impl Fn(Bytes) -> Option<T>) -> Option<T> {
     // Don't hand blocked urls to the proxy either, it would fetch them for us.
     if !Url::parse(url).is_ok_and(|u| is_allowed_url(&u)) {
@@ -367,25 +421,29 @@ async fn fetch_and_parse<T>(url: &str, parse: impl Fn(Bytes) -> Option<T>) -> Op
     match fetch(url).await {
         Ok(bytes) => match parse(bytes) {
             Some(parsed) => return Some(parsed),
-            None => warn!("Failed decoding image from {url}"),
+            None => warn!("Response from {url} is not a readable image"),
         },
-        Err(err) => warn!("Failed fetching with err {}", err),
+        Err(err) => warn!("Direct fetch failed: {}", err),
     }
 
+    let Ok(proxy_base_url) = env::var("IMAGE_FALLBACK_URL") else {
+        debug!("IMAGE_FALLBACK_URL not set, skipping proxy for {url}");
+        return None;
+    };
     let url_encoded: String = byte_serialize(url.as_bytes()).collect();
-    let proxy_url = format!("https://webkit.extruct.iavian.net/webkit/proxy?url={url_encoded}");
+    let proxy_url = format!("{proxy_base_url}{url_encoded}");
     info!("Fetching from proxy {proxy_url}");
 
     match fetch(&proxy_url).await {
         Ok(bytes) => match parse(bytes) {
             Some(parsed) => Some(parsed),
             None => {
-                warn!("Failed decoding image from proxy {proxy_url}");
+                warn!("Response from proxy {proxy_url} is not a readable image");
                 None
             }
         },
         Err(err) => {
-            warn!("Fetching from proxy {proxy_url} failed {}", err);
+            warn!("Fetching from proxy {proxy_url} failed: {}", err);
             None
         }
     }
@@ -555,7 +613,7 @@ struct InvalidSizeError {
 
 impl InvalidSizeError {
     pub fn new(size: &Size) -> InvalidSizeError {
-        let message = format!("Size {:?} is not valid.", size);
+        let message = format!("Invalid size {:?}", size);
         InvalidSizeError { msg: message }
     }
 }
@@ -564,7 +622,7 @@ impl Error for InvalidSizeError {}
 
 impl fmt::Display for InvalidSizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid size {}", self.msg)
+        write!(f, "{}", self.msg)
     }
 }
 
@@ -653,6 +711,20 @@ mod tests {
             .write_to(&mut Cursor::new(&mut buf), format)
             .unwrap();
         Bytes::from(buf)
+    }
+
+    #[test]
+    fn parse_remote_dimensions_json() {
+        assert_eq!(
+            parse_remote_dimensions(br#"{ "width": 1200, "height": 800 }"#),
+            Some((1200, 800))
+        );
+        assert_eq!(
+            parse_remote_dimensions(br#"{ "width": 0, "height": 800 }"#),
+            None
+        );
+        assert_eq!(parse_remote_dimensions(br#"{ "error": "nope" }"#), None);
+        assert_eq!(parse_remote_dimensions(b"<html>blocked</html>"), None);
     }
 
     #[test]

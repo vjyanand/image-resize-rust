@@ -260,7 +260,7 @@ async fn fetch_remote_dimensions(url: &str) -> Option<(u32, u32)> {
         Ok(bytes) => {
             let parsed = parse_remote_dimensions(&bytes);
             if parsed.is_none() {
-                warn!("Failed parsing dimensions from {dim_url}");
+                warn!("No usable dimensions from {dim_url}");
             }
             parsed
         }
@@ -358,7 +358,6 @@ fn build_client() -> reqwest::Result<Client> {
 async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
     if !Url::parse(url).is_ok_and(|u| is_allowed_url(&u)) {
         let error_string = format!("Refusing to fetch {url}: not a public http(s) url");
-        warn!("{error_string}");
         return Err(InvalidResponseError { msg: error_string });
     }
 
@@ -366,7 +365,6 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
         Ok(client) => client,
         Err(err) => {
             let error_string = format!("Failed to create HTTP client: {err}");
-            error!("{error_string}");
             return Err(InvalidResponseError { msg: error_string });
         }
     };
@@ -377,7 +375,6 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
         Ok(r) => r,
         Err(err) => {
             let error_string = format!("Error fetching {url}: {err:?}");
-            warn!("{error_string}");
             return Err(InvalidResponseError { msg: error_string });
         }
     };
@@ -387,7 +384,6 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
             "Error fetching {url}: status code {}",
             response.status().as_str()
         );
-        warn!("{error_string}");
         return Err(InvalidResponseError { msg: error_string });
     }
 
@@ -396,7 +392,6 @@ async fn fetch(url: &str) -> Result<Bytes, InvalidResponseError> {
         Ok(bytes) => Ok(bytes),
         Err(err) => {
             let error_string = format!("Error reading body of {url}: {err}");
-            warn!("{error_string}");
             Err(InvalidResponseError { msg: error_string })
         }
     }
